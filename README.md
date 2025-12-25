@@ -3,8 +3,9 @@
 ```
 .addrepo ttps://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/
 ```
+или
 ```MCUB-command
-.fcfg list repositories h
+.fcfg list repositories https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/
 ```
 или установите в ядре по умолчанию repo
 
