@@ -1,4 +1,4 @@
-# author: @Hairpin00
+# author: @Mitrichq
 # version: 1.0.1
 # description: сокращение ссылок через различные сервисы
 # requires: aiohttp
