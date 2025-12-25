@@ -1,7 +1,7 @@
 ## Repo для MCUB юзербота
 Установка: 
 ```
-.addrepo ttps://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/
+.addrepo https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/
 ```
 или
 ```MCUB-command
