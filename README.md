@@ -1,7 +1,10 @@
 ## Repo для MCUB юзербота
 Установка: 
+```
+.addrepo ttps://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/
+```
 ```MCUB-command
-.fcfg list repositories https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/
+.fcfg list repositories h
 ```
 или установите в ядре по умолчанию repo
 
