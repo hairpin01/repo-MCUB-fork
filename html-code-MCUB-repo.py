@@ -1,3 +1,8 @@
+# author: @Hairpin00
+# version: 1.0.0
+# description: html-разметка сообщений
+# requires: html
+
 import html
 from telethon.tl.types import MessageEntityCustomEmoji
 
