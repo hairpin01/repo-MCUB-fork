@@ -7,6 +7,7 @@ import json
 import os
 import re
 from telethon.tl.types import MessageEntityTextUrl
+from telethon import events
 
 CONFIG_FILE = "link_preview_config.json"
 ZERO_WIDTH_CHAR = "\u2060"
