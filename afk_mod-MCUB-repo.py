@@ -118,6 +118,7 @@ def register(kernel):
             await kernel.handle_error(e, source="set_emoji_status", event=None)
 
     @kernel.register_command('afk')
+    # [причина] [возращение]
     async def afk_cmd(event):
         try:
             args = event.text.split(maxsplit=2)
@@ -166,6 +167,7 @@ def register(kernel):
             await event.edit(f"{PREMIUM_EMOJI['error']} <b>Ошибка, смотри логи</b>", parse_mode='html')
 
     @kernel.register_command('unafk')
+    # выйти из afk
     async def unafk_cmd(event):
         try:
             kernel.config['afk_status'] = False
