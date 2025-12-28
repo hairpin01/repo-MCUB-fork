@@ -45,7 +45,7 @@ def register(kernel):
     async def wiki_handler(event):
         args = event.text.split()
         if len(args) < 2:
-            await event.edit('⛈️ Использование: .wiki [язык] запрос')
+            await event.edit('<tg-emoji emoji-id="5330273431898318607">🌩</tg-emoji> Использование: .wiki [язык] запрос', parse_mode='html')
             return
 
         if len(args) == 2:
@@ -60,7 +60,7 @@ def register(kernel):
                 query = ' '.join(args[1:])
 
         try:
-            msg = await event.edit(f'🔍 Поиск `{query}`...')
+            msg = await event.edit(f'<tg-emoji emoji-id="5373236586760651455">⏱️</tg-emoji> Поиск <code>{query}</code>...', parse_mode='html')
         except:
             return
 
@@ -73,25 +73,25 @@ def register(kernel):
                 text = f'⛈️ Статья не найдена\n\n🔍 Похожие запросы:\n'
                 for i, res in enumerate(search_results[1], 1):
                     text += f'{i}. {res}\n'
-                await msg.edit(text)
+                await msg.edit(text, parse_mode='html')
                 return
             
             if lang != 'en':
                 page_data = await get_wiki_page(query, 'en')
         
         if not page_data:
-            await msg.edit('⛈️ Ничего не найдено.')
+            await msg.edit('<tg-emoji emoji-id="5330273431898318607">🌩</tg-emoji> Ничего не найдено.', parse_mode='html')
             return
 
         title = page_data.get('title', '')
         extract = page_data.get('extract', '')
         url = page_data.get('content_urls', {}).get('desktop', {}).get('page', '')
         
-        result = f'📖 **{title}**\n\n{extract}'
+        result = f'<tg-emoji emoji-id="5372849966689566579">✈️</tg-emoji> <b>{title}</b>\n\n<blockquote>{extract}</blockquote>'
         if url:
-            result += f'\n\n🔗 {url}'
+            result += f'\n\n<blockquote>🔗 {url}</blockquote>'
         
         if len(result) > 4096:
             result = result[:4000] + '...'
             
-        await msg.edit(result)
+        await msg.edit(result, parse_mode='html')
