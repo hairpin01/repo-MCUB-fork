@@ -1,6 +1,6 @@
 # requires: spotipy, aiohttp, pillow, musicdl
-# author: @LoLpryvet
-# version: 1.0.0
+# author: @LoLpryvet && порт: @Hairpin00
+# version: 1.0.1
 # description: Слушай музыку в Spotify
 
 import asyncio
@@ -9,6 +9,7 @@ import tempfile
 import aiohttp
 import os
 import re
+import io
 from io import BytesIO
 
 import spotipy
@@ -47,6 +48,7 @@ def register(kernel):
     kernel.config.setdefault('spots_refresh_token', None)
     kernel.config.setdefault('spots_scopes', 'user-read-playback-state user-library-read')
     kernel.config.setdefault('spots_genius_token', None)
+    kernel.config.setdefault('spots_font_url', 'https://raw.githubusercontent.com/kamekuro/assets/master/fonts/Onest-Bold.ttf')
 
     musicdl = None
 
@@ -108,6 +110,30 @@ def register(kernel):
             return f"https://siasky.net/{skynet.json()['skylink']}"
 
     musicdl = MusicDL(client)
+
+    async def _load_font(size):
+        """Загружает шрифт по URL из конфигурации"""
+        try:
+            font_url = kernel.config.get('spots_font_url', 'https://raw.githubusercontent.com/kamekuro/assets/master/fonts/Onest-Bold.ttf')
+            async with aiohttp.ClientSession() as session:
+                async with session.get(font_url) as response:
+                    if response.status == 200:
+                        font_data = await response.read()
+                        return ImageFont.truetype(BytesIO(font_data), size)
+        except Exception as e:
+            logger.warning(f"Failed to load custom font, using fallback: {e}")
+
+        # Fallback на системные шрифты
+        try:
+            return ImageFont.truetype("/System/Library/Fonts/Helvetica-Bold.ttc", size)
+        except:
+            try:
+                return ImageFont.truetype("arial.ttf", size)
+            except:
+                try:
+                    return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+                except:
+                    return ImageFont.load_default()
 
     async def _get_lyrics_from_lrclib(artist, title, duration_ms=None):
         try:
@@ -478,8 +504,10 @@ def register(kernel):
 
     async def _create_song_card(track_info):
         try:
-            card_width = 800
-            card_height = 300
+            W, H = 800, 300
+            title_font = await _load_font(42)
+            artist_font = await _load_font(28)
+            time_font = await _load_font(20)
 
             album_art_url = track_info['album_art']
             async with aiohttp.ClientSession() as session:
@@ -503,15 +531,15 @@ def register(kernel):
             dominant_r, dominant_g, dominant_b = get_dominant_color(album_art_original)
             bg_r, bg_g, bg_b = create_darker_variant(dominant_r, dominant_g, dominant_b)
 
-            card = Image.new('RGB', (card_width, card_height), color=(bg_r, bg_g, bg_b))
+            card = Image.new('RGB', (W, H), color=(bg_r, bg_g, bg_b))
             draw = ImageDraw.Draw(card)
 
             center_x = 150
-            center_y = card_height // 2
-            max_distance = max(card_width, card_height)
+            center_y = H // 2
+            max_distance = max(W, H)
 
-            for x in range(card_width):
-                for y in range(card_height):
+            for x in range(W):
+                for y in range(H):
                     distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
                     factor = min(1.0, distance / max_distance)
                     final_r = int(bg_r + (bg_r * 0.2 - bg_r) * factor)
@@ -530,27 +558,8 @@ def register(kernel):
             album_art.putalpha(mask)
 
             art_x = 30
-            art_y = int((card_height - album_size) // 2)
+            art_y = int((H - album_size) // 2)
             card.paste(album_art, (art_x, art_y), album_art)
-
-            try:
-                title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica-Bold.ttc", 42)
-                artist_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
-                time_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
-            except:
-                try:
-                    title_font = ImageFont.truetype("arial.ttf", 42)
-                    artist_font = ImageFont.truetype("arial.ttf", 28)
-                    time_font = ImageFont.truetype("arial.ttf", 20)
-                except:
-                    try:
-                        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
-                        artist_font = ImageFont.truetype("DejaVuSans.ttf", 28)
-                        time_font = ImageFont.truetype("DejaVuSans.ttf", 20)
-                    except:
-                        title_font = ImageFont.load_default()
-                        artist_font = ImageFont.load_default()
-                        time_font = ImageFont.load_default()
 
             text_x = art_x + album_size + 30
             track_name = track_info['track_name']
@@ -564,7 +573,7 @@ def register(kernel):
             draw.text((text_x, 110), artist_name, font=artist_font, fill='#A0A0A0')
 
             progress_y = 220
-            progress_width = card_width - text_x - 30
+            progress_width = W - text_x - 30
             progress_height = 6
             progress_x = text_x
 
@@ -608,8 +617,9 @@ def register(kernel):
 
     async def _create_song_card_no_time(track_info):
         try:
-            card_width = 800
-            card_height = 250
+            W, H = 800, 250
+            title_font = await _load_font(42)
+            artist_font = await _load_font(28)
 
             album_art_url = track_info['album_art']
             async with aiohttp.ClientSession() as session:
@@ -633,15 +643,15 @@ def register(kernel):
             dominant_r, dominant_g, dominant_b = get_dominant_color(album_art_original)
             bg_r, bg_g, bg_b = create_darker_variant(dominant_r, dominant_g, dominant_b)
 
-            card = Image.new('RGB', (card_width, card_height), color=(bg_r, bg_g, bg_b))
+            card = Image.new('RGB', (W, H), color=(bg_r, bg_g, bg_b))
             draw = ImageDraw.Draw(card)
 
             center_x = 125
-            center_y = card_height // 2
-            max_distance = max(card_width, card_height)
+            center_y = H // 2
+            max_distance = max(W, H)
 
-            for x in range(card_width):
-                for y in range(card_height):
+            for x in range(W):
+                for y in range(H):
                     distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
                     factor = min(1.0, distance / max_distance)
                     final_r = int(bg_r + (bg_r * 0.2 - bg_r) * factor)
@@ -660,31 +670,16 @@ def register(kernel):
             album_art.putalpha(mask)
 
             art_x = 25
-            art_y = int((card_height - album_size) // 2)
+            art_y = int((H - album_size) // 2)
             card.paste(album_art, (art_x, art_y), album_art)
-
-            try:
-                title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica-Bold.ttc", 42)
-                artist_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
-            except:
-                try:
-                    title_font = ImageFont.truetype("arial.ttf", 42)
-                    artist_font = ImageFont.truetype("arial.ttf", 28)
-                except:
-                    try:
-                        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
-                        artist_font = ImageFont.truetype("DejaVuSans.ttf", 28)
-                    except:
-                        title_font = ImageFont.load_default()
-                        artist_font = ImageFont.load_default()
 
             text_x = art_x + album_size + 30
             track_name = track_info['track_name']
             if len(track_name) > 20:
                 track_name = track_name[:20] + "..."
 
-            title_y = card_height // 2 - 30
-            artist_y = card_height // 2 + 10
+            title_y = H // 2 - 30
+            artist_y = H // 2 + 10
             draw.text((text_x, title_y), track_name, font=title_font, fill='white')
 
             artist_name = track_info['artist_name']
@@ -692,10 +687,11 @@ def register(kernel):
                 artist_name = artist_name[:25] + "..."
             draw.text((text_x, artist_y), artist_name, font=artist_font, fill='#A0A0A0')
 
-            live_indicator_x = card_width - 80
+            live_indicator_x = W - 80
             live_indicator_y = 20
             draw.ellipse([live_indicator_x, live_indicator_y, live_indicator_x + 12, live_indicator_y + 12], fill='#FF0000')
-            draw.text((live_indicator_x + 20, live_indicator_y - 3), "LIVE", font=artist_font, fill='#FF0000')
+            live_font = await _load_font(20)
+            draw.text((live_indicator_x + 20, live_indicator_y - 3), "LIVE", font=live_font, fill='#FF0000')
 
             card_path = os.path.join(tempfile.gettempdir(), f"playnow_card_{track_info['track_id']}.png")
             card.save(card_path, "PNG")
