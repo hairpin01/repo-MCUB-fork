@@ -1,6 +1,6 @@
 # requires: spotipy, aiohttp, pillow, musicdl
 # author: @LoLpryvet && порт: @Hairpin00
-# version: 1.0.1
+# version: 1.0.2
 # description: Слушай музыку в Spotify
 
 import asyncio
