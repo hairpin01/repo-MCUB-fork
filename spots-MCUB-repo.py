@@ -553,7 +553,7 @@ def register(kernel):
             art_y = (H - album_size) // 2
             card.paste(album_art, (art_x, art_y), album_art)
     
-            text_x = art_x + album_size + 20  уп
+            text_x = art_x + album_size + 20
             text_width = W - text_x - 20
 
             track_name = track_info['track_name']
