@@ -502,87 +502,91 @@ def register(kernel):
             if hasattr(kernel, '_realtime_lyrics_data'):
                 kernel._realtime_lyrics_data['active'] = False
 
+
     async def _create_song_card(track_info):
         try:
-            W, H = 800, 300
-            title_font = await _load_font(42)
-            artist_font = await _load_font(28)
-            time_font = await _load_font(20)
-
+            W, H = 600, 250  
+            title_font = await _load_font(34)  
+            artist_font = await _load_font(22)
+            time_font = await _load_font(18)
+    
             album_art_url = track_info['album_art']
             async with aiohttp.ClientSession() as session:
                 async with session.get(album_art_url) as response:
                     art_data = await response.read()
                     album_art_original = Image.open(BytesIO(art_data))
-
+    
             def get_dominant_color(image):
                 small_image = image.resize((50, 50))
                 stat = ImageStat.Stat(small_image)
                 r, g, b = stat.mean
                 return int(r), int(g), int(b)
-
+    
             def create_darker_variant(r, g, b, factor=0.4):
                 h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
                 v = max(0.15, v * factor)
                 s = min(1.0, s * 1.1)
                 r, g, b = colorsys.hsv_to_rgb(h, s, v)
                 return int(r * 255), int(g * 255), int(b * 255)
-
+    
             dominant_r, dominant_g, dominant_b = get_dominant_color(album_art_original)
             bg_r, bg_g, bg_b = create_darker_variant(dominant_r, dominant_g, dominant_b)
-
+    
             card = Image.new('RGB', (W, H), color=(bg_r, bg_g, bg_b))
             draw = ImageDraw.Draw(card)
-
-            center_x = 150
-            center_y = H // 2
-            max_distance = max(W, H)
-
-            for x in range(W):
-                for y in range(H):
-                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-                    factor = min(1.0, distance / max_distance)
-                    final_r = int(bg_r + (bg_r * 0.2 - bg_r) * factor)
-                    final_g = int(bg_g + (bg_g * 0.2 - bg_g) * factor)
-                    final_b = int(bg_b + (bg_b * 0.2 - bg_b) * factor)
-                    final_r = max(0, min(255, final_r))
-                    final_g = max(0, min(255, final_g))
-                    final_b = max(0, min(255, final_b))
-                    card.putpixel((x, y), (final_r, final_g, final_b))
-
-            album_size = 240
+    
+            for y in range(H):
+                factor = y / H
+                r = int(bg_r * (1 - factor * 0.2))
+                g = int(bg_g * (1 - factor * 0.2))
+                b = int(bg_b * (1 - factor * 0.2))
+                draw.line([(0, y), (W, y)], fill=(r, g, b))
+    
+            album_size = 180  
             album_art = album_art_original.resize((album_size, album_size), Image.Resampling.LANCZOS)
             mask = Image.new('L', (album_size, album_size), 0)
             mask_draw = ImageDraw.Draw(mask)
-            mask_draw.rounded_rectangle([0, 0, album_size, album_size], radius=20, fill=255)
+            mask_draw.rounded_rectangle([0, 0, album_size, album_size], radius=15, fill=255)  # Меньший радиус
             album_art.putalpha(mask)
-
-            art_x = 30
-            art_y = int((H - album_size) // 2)
+    
+            art_x = 20  
+            art_y = (H - album_size) // 2
             card.paste(album_art, (art_x, art_y), album_art)
+    
+            text_x = art_x + album_size + 20  уп
+            text_width = W - text_x - 20
 
-            text_x = art_x + album_size + 30
             track_name = track_info['track_name']
-            if len(track_name) > 20:
-                track_name = track_name[:20] + "..."
-            draw.text((text_x, 60), track_name, font=title_font, fill='white')
-
+            if len(track_name) > 25:  
+                track_name = track_name[:25] + "..."
+            
+            import textwrap
+            title_lines = textwrap.wrap(track_name, width=18)  
+            title_y = art_y + 5
+            
+            for i, line in enumerate(title_lines[:2]): 
+                draw.text((text_x, title_y + i*40), line, font=title_font, fill='white')
+            
+          
             artist_name = track_info['artist_name']
-            if len(artist_name) > 25:
-                artist_name = artist_name[:25] + "..."
-            draw.text((text_x, 110), artist_name, font=artist_font, fill='#A0A0A0')
-
-            progress_y = 220
-            progress_width = W - text_x - 30
-            progress_height = 6
+            if len(artist_name) > 30:
+                artist_name = artist_name[:30] + "..."
+            
+            artist_y = title_y + (len(title_lines)*40 if len(title_lines) > 0 else 40)
+            draw.text((text_x, artist_y), artist_name, font=artist_font, fill='#A0A0A0')
+    
+          
+            progress_y = H - 45
+            progress_width = W - text_x - 20
+            progress_height = 5 
             progress_x = text_x
-
+    
             draw.rounded_rectangle([progress_x, progress_y, progress_x + progress_width, progress_y + progress_height],
-                                 radius=3, fill='#555555')
-
+                                 radius=2, fill='#555555')
+    
             current_time_str = track_info.get('current_time', '00:17')
             duration_str = track_info['duration']
-
+    
             try:
                 current_parts = current_time_str.split(':')
                 current_seconds = int(current_parts[0]) * 60 + int(current_parts[1])
@@ -594,105 +598,104 @@ def register(kernel):
                     progress_ratio = 0.1
             except:
                 progress_ratio = 0.1
-
+    
             progress_fill = int(progress_width * progress_ratio)
             draw.rounded_rectangle([progress_x, progress_y, progress_x + progress_fill, progress_y + progress_height],
-                                 radius=3, fill='white')
-
-            current_time = track_info.get('current_time', '00:17')
-            total_time = track_info['duration']
-            draw.text((progress_x, progress_y + 20), current_time, font=time_font, fill='#A0A0A0')
-
-            time_bbox = draw.textbbox((0, 0), total_time, font=time_font)
+                                 radius=2, fill='#1DB954')  
+    
+            draw.text((progress_x, progress_y + 10), current_time_str, font=time_font, fill='#A0A0A0')
+    
+            time_bbox = draw.textbbox((0, 0), duration_str, font=time_font)
             time_width = time_bbox[2] - time_bbox[0]
-            draw.text((progress_x + progress_width - time_width, progress_y + 20), total_time,
+            draw.text((progress_x + progress_width - time_width, progress_y + 10), duration_str,
                      font=time_font, fill='#A0A0A0')
-
+    
             card_path = os.path.join(tempfile.gettempdir(), f"spots_card_{track_info['track_id']}.png")
             card.save(card_path, "PNG")
             return card_path
         except Exception as e:
             logger.error(f"Error creating song card: {e}")
             return None
-
+    
     async def _create_song_card_no_time(track_info):
         try:
-            W, H = 800, 250
-            title_font = await _load_font(42)
-            artist_font = await _load_font(28)
-
+            W, H = 600, 200  
+            title_font = await _load_font(34)
+            artist_font = await _load_font(22)
+    
             album_art_url = track_info['album_art']
             async with aiohttp.ClientSession() as session:
                 async with session.get(album_art_url) as response:
                     art_data = await response.read()
                     album_art_original = Image.open(BytesIO(art_data))
-
+    
             def get_dominant_color(image):
                 small_image = image.resize((50, 50))
                 stat = ImageStat.Stat(small_image)
                 r, g, b = stat.mean
                 return int(r), int(g), int(b)
-
+    
             def create_darker_variant(r, g, b, factor=0.4):
                 h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
                 v = max(0.15, v * factor)
                 s = min(1.0, s * 1.1)
                 r, g, b = colorsys.hsv_to_rgb(h, s, v)
                 return int(r * 255), int(g * 255), int(b * 255)
-
+    
             dominant_r, dominant_g, dominant_b = get_dominant_color(album_art_original)
             bg_r, bg_g, bg_b = create_darker_variant(dominant_r, dominant_g, dominant_b)
-
+    
             card = Image.new('RGB', (W, H), color=(bg_r, bg_g, bg_b))
             draw = ImageDraw.Draw(card)
-
-            center_x = 125
-            center_y = H // 2
-            max_distance = max(W, H)
-
-            for x in range(W):
-                for y in range(H):
-                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-                    factor = min(1.0, distance / max_distance)
-                    final_r = int(bg_r + (bg_r * 0.2 - bg_r) * factor)
-                    final_g = int(bg_g + (bg_g * 0.2 - bg_g) * factor)
-                    final_b = int(bg_b + (bg_b * 0.2 - bg_b) * factor)
-                    final_r = max(0, min(255, final_r))
-                    final_g = max(0, min(255, final_g))
-                    final_b = max(0, min(255, final_b))
-                    card.putpixel((x, y), (final_r, final_g, final_b))
-
-            album_size = 200
+    
+            for y in range(H):
+                factor = y / H
+                r = int(bg_r * (1 - factor * 0.15))
+                g = int(bg_g * (1 - factor * 0.15))
+                b = int(bg_b * (1 - factor * 0.15))
+                draw.line([(0, y), (W, y)], fill=(r, g, b))
+    
+            album_size = 160 
             album_art = album_art_original.resize((album_size, album_size), Image.Resampling.LANCZOS)
             mask = Image.new('L', (album_size, album_size), 0)
             mask_draw = ImageDraw.Draw(mask)
-            mask_draw.rounded_rectangle([0, 0, album_size, album_size], radius=20, fill=255)
+            mask_draw.rounded_rectangle([0, 0, album_size, album_size], radius=15, fill=255)
             album_art.putalpha(mask)
-
-            art_x = 25
-            art_y = int((H - album_size) // 2)
+    
+            art_x = 15
+            art_y = (H - album_size) // 2
             card.paste(album_art, (art_x, art_y), album_art)
-
-            text_x = art_x + album_size + 30
+    
+            text_x = art_x + album_size + 15
+            text_width = W - text_x - 15
+            
+         
             track_name = track_info['track_name']
-            if len(track_name) > 20:
-                track_name = track_name[:20] + "..."
-
-            title_y = H // 2 - 30
-            artist_y = H // 2 + 10
+            if len(track_name) > 22:
+                track_name = track_name[:22] + "..."
+            
+            title_y = H // 2 - 25
             draw.text((text_x, title_y), track_name, font=title_font, fill='white')
-
+    
             artist_name = track_info['artist_name']
             if len(artist_name) > 25:
                 artist_name = artist_name[:25] + "..."
+            
+            artist_y = H // 2 + 5
             draw.text((text_x, artist_y), artist_name, font=artist_font, fill='#A0A0A0')
-
-            live_indicator_x = W - 80
-            live_indicator_y = 20
-            draw.ellipse([live_indicator_x, live_indicator_y, live_indicator_x + 12, live_indicator_y + 12], fill='#FF0000')
-            live_font = await _load_font(20)
-            draw.text((live_indicator_x + 20, live_indicator_y - 3), "LIVE", font=live_font, fill='#FF0000')
-
+    
+            live_font = await _load_font(16)
+            live_text = "LIVE"
+            live_bbox = draw.textbbox((0, 0), live_text, font=live_font)
+            live_width = live_bbox[2] - live_bbox[0]
+            
+            live_x = W - live_width - 20
+            live_y = 20
+            
+           
+            draw.ellipse([live_x - 20, live_y, live_x - 8, live_y + 12], fill='#FF0000')
+            draw.text((live_x, live_y - 2), live_text, font=live_font, fill='#FF0000')
+    
             card_path = os.path.join(tempfile.gettempdir(), f"playnow_card_{track_info['track_id']}.png")
             card.save(card_path, "PNG")
             return card_path
