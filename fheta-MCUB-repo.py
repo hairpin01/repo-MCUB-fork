@@ -284,6 +284,13 @@ def register(kernel):
     async def fheta_inline(event):
         query = event.text.strip()
         
+        # Убираем "fheta " из начала запроса, если он есть
+        if query.lower().startswith('fheta '):
+            query = query[6:].strip()  # 6 = len('fheta ')
+        # Если просто "fheta" без запроса
+        elif query.lower() == 'fheta':
+            query = ''
+        
         if not query:
             builder = event.builder.article(
                 title="Введите запрос для поиска",
@@ -336,7 +343,7 @@ def register(kernel):
         
         await event.answer(results)
     
-    kernel.register_inline_handler('', fheta_inline)
+    kernel.register_inline_handler('fheta', fheta_inline)
     
     async def callback_handler(event):
         data = event.data.decode()
