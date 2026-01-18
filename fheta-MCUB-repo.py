@@ -262,7 +262,7 @@ def register(kernel):
             
             success, message = await kernel.inline_query_and_click(
                 chat_id=event.chat_id,
-                query=f"fheta {query}",
+                query=query,
                 bot_username=bot_username,
                 result_index=0,
                 silent=False,
@@ -336,7 +336,7 @@ def register(kernel):
         
         await event.answer(results)
     
-    kernel.register_inline_handler('fheta', fheta_inline)
+    kernel.register_inline_handler('', fheta_inline)
     
     async def callback_handler(event):
         data = event.data.decode()
