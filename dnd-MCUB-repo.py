@@ -5,8 +5,8 @@ import logging
 import re
 import time
 from typing import Union
-from telethon import events
-from telethon.tl.types import User, Channel, PeerUser
+from telethon import events, Button
+from telethon.tl.types import User, Channel, PeerUser, MessageEntityCustomEmoji
 from telethon.tl.functions.contacts import BlockRequest, UnblockRequest
 from telethon.tl.functions.messages import ReportSpamRequest, DeleteHistoryRequest
 from telethon.tl.functions.account import UpdateProfileRequest
@@ -54,11 +54,12 @@ def register(kernel):
     kernel.config.setdefault('dnd_texts', {})
     kernel.config.setdefault('dnd_notif', {})
     
-    _ratelimit_afk = []
-    _ratelimit_pmbl = []
-    _ratelimit_pmbl_threshold = 10
-    _ratelimit_pmbl_timeout = 5 * 60
-    _sent_messages = []
+    module_temp_data = {
+        'ratelimit_afk': [],
+        'ratelimit_pmbl': [],
+        'sent_messages': [],
+        'unstatus_task': None
+    }
     
     def get_display_name(user):
         if hasattr(user, 'first_name') and hasattr(user, 'last_name'):
@@ -138,19 +139,27 @@ def register(kernel):
         if user_id not in whitelist:
             whitelist.append(user_id)
             kernel.config['dnd_whitelist'] = whitelist
-            logger.info(f"User {user_id} approved in pm, reason: {reason}")
+            kernel.cprint(f"User {user_id} approved in pm, reason: {reason}", kernel.Colors.GREEN)
     
     def _unapprove(user_id):
         whitelist = kernel.config.get('dnd_whitelist', [])
         if user_id in whitelist:
             whitelist.remove(user_id)
             kernel.config['dnd_whitelist'] = whitelist
-            logger.info(f"User {user_id} unapproved in pm")
+            kernel.cprint(f"User {user_id} unapproved in pm", kernel.Colors.YELLOW)
+    
+    async def _send_log_message(text, buttons=None):
+        try:
+            if kernel.is_bot_available() and kernel.log_chat_id:
+                await kernel.bot_client.send_message(kernel.log_chat_id, text, parse_mode='html', buttons=buttons)
+            else:
+                me = await client.get_me()
+                await client.send_message(me.id, text, parse_mode='html', buttons=buttons)
+        except Exception as e:
+            kernel.log_error(f"Failed to send log: {e}")
     
     async def _send_pmbl_message(message, peer, contact, started_by_you, active_peer, self_id):
-        global _ratelimit_pmbl
-        
-        if len(_ratelimit_pmbl) < _ratelimit_pmbl_threshold:
+        if len(module_temp_data['ratelimit_pmbl']) < 10:
             caption = kernel.config.get('dnd_custom_message') or (
                 "😊 <b>Hey there •ᴗ•</b>\n<b>i am Unit «SIGMA»<b>, the "
                 "<b>guardian</b> of this account. You are <b>not approved</b>! You "
@@ -168,7 +177,7 @@ def register(kernel):
             except Exception:
                 await message.edit(caption, parse_mode='html')
             
-            _ratelimit_pmbl.append(int(time.time()))
+            module_temp_data['ratelimit_pmbl'].append(int(time.time()))
             
             try:
                 peer_entity = await client.get_entity(peer)
@@ -189,8 +198,11 @@ def register(kernel):
                 f"<code>{raw_text(message)[:3000]}</code>"
             )
             
-            me = await client.get_me()
-            await client.send_message(me.id, banned_log, parse_mode='html')
+            log_buttons = [[
+                Button.inline("🔓 Разблокировать", f"dnd_unblock_{peer_entity.id}".encode())
+            ]]
+            
+            await _send_log_message(banned_log, buttons=log_buttons)
     
     async def _active_peer(cid, peer):
         if kernel.config.get('dnd_ignore_active'):
@@ -205,9 +217,6 @@ def register(kernel):
         return False
     
     async def _punish_handler(cid):
-        from telethon.tl.functions.contacts import BlockRequest
-        from telethon.tl.functions.messages import ReportSpamRequest, DeleteHistoryRequest
-        
         await client(BlockRequest(id=cid))
         if kernel.config.get('dnd_report_spam'):
             await client(ReportSpamRequest(peer=cid))
@@ -224,32 +233,24 @@ def register(kernel):
         kernel.config['dnd_further'] = ''
         
         if kernel.config.get('dnd_old_bio'):
-            from telethon.tl.functions.account import UpdateProfileRequest
             await client(UpdateProfileRequest(about=kernel.config['dnd_old_bio']))
             kernel.config['dnd_old_bio'] = ''
         
-        global _sent_messages
-        for m in _sent_messages:
+        for m in module_temp_data['sent_messages']:
             try:
                 await m.delete()
             except Exception as e:
-                logger.debug(f"Message not deleted due to {e}")
+                kernel.log_debug(f"Message not deleted due to {e}")
         
-        _sent_messages = []
-        _ratelimit_afk.clear()
+        module_temp_data['sent_messages'] = []
+        module_temp_data['ratelimit_afk'].clear()
     
     @kernel.register_command('cdnd')
-    # Открыть конфигурацию модуля
     async def cdnd_cmd(event):
-
         await event.edit(f"{CUSTOM_EMOJI['lock']} <b>Используйте:</b> <code>{prefix}cfg</code> <b>для настройки модуля</b>", parse_mode='html')
     
     @kernel.register_command('pmbanlast')
-    # <число> - Заблокировать последние N диалогов
     async def pmbanlast_cmd(event):
-        from telethon.tl.functions.contacts import BlockRequest
-        from telethon.tl.functions.messages import DeleteHistoryRequest
-        
         args = event.text.split()
         if len(args) < 2 or not args[1].isdigit():
             await event.edit(f"{CUSTOM_EMOJI['info']} <b>Пример использования: </b><code>{prefix}pmbanlast 5</code>", parse_mode='html')
@@ -260,7 +261,6 @@ def register(kernel):
         
         dialogs = []
         async for dialog in client.iter_dialogs(ignore_pinned=True):
-            from telethon.tl.types import PeerUser
             if isinstance(dialog.entity, PeerUser):
                 m = await client.get_messages(dialog.entity, limit=1, reverse=True)
                 if m:
@@ -276,9 +276,7 @@ def register(kernel):
         await event.edit(f"{CUSTOM_EMOJI['cloud']} <b>Удалил {n} последних диалогов!</b>", parse_mode='html')
     
     @kernel.register_command('allowpm')
-    # <ответ или username> - Разрешить пользователю писать в ЛС
     async def allowpm_cmd(event):
-
         user = None
         args = event.text.split()
         
@@ -294,7 +292,6 @@ def register(kernel):
         
         if not user:
             chat = await event.get_chat()
-            from telethon.tl.types import User
             if isinstance(chat, User):
                 user = chat
             else:
@@ -305,9 +302,7 @@ def register(kernel):
         await event.edit(f'{CUSTOM_EMOJI["cloud"]} <b><a href="tg://user?id={user.id}">{get_display_name(user)}</a> допущен к ЛС.</b>', parse_mode='html')
     
     @kernel.register_command('denypm')
-    # <ответ или username> - Запретить пользователю писать в ЛС
     async def denypm_cmd(event):
-
         user = None
         args = event.text.split()
         
@@ -323,7 +318,6 @@ def register(kernel):
         
         if not user:
             chat = await event.get_chat()
-            from telethon.tl.types import User
             if isinstance(chat, User):
                 user = chat
             else:
@@ -334,29 +328,29 @@ def register(kernel):
         await event.edit(f'{CUSTOM_EMOJI["cloud"]} <b><a href="tg://user?id={user.id}">{get_display_name(user)}</a> не допущен к ЛС.</b>', parse_mode='html')
     
     @kernel.register_command('block')
-    # <ответ> - Заблокировать пользователя
     async def block_cmd(event):
-
         if not event.is_reply:
             await event.edit(f"{CUSTOM_EMOJI['info']} <b>Ответьте на сообщение, чтобы заблокировать пользователя</b>", parse_mode='html')
             return
         
-        from telethon.tl.functions.contacts import BlockRequest
         reply = await event.get_reply_message()
         user = await reply.get_sender()
         
         await client(BlockRequest(id=user.id))
-        await event.edit(f'{CUSTOM_EMOJI["cloud"]} <b><a href="tg://user?id={user.id}">{get_display_name(user)}</a> заблокирован.</b>', parse_mode='html')
+        
+        log_msg = f'{CUSTOM_EMOJI["cloud"]} <b><a href="tg://user?id={user.id}">{get_display_name(user)}</a> заблокирован.</b>'
+        buttons = [[
+            Button.inline("🔓 Разблокировать", f"dnd_unblock_{user.id}".encode())
+        ]]
+        
+        await event.edit(log_msg, parse_mode='html', buttons=buttons)
     
     @kernel.register_command('unblock')
-    # <ответ> - Разблокировать пользователя
     async def unblock_cmd(event):
-
         if not event.is_reply:
             await event.edit(f"{CUSTOM_EMOJI['info']} <b>Ответьте на сообщение, чтобы разблокировать пользователя</b>", parse_mode='html')
             return
         
-        from telethon.tl.functions.contacts import UnblockRequest
         reply = await event.get_reply_message()
         user = await reply.get_sender()
         
@@ -364,12 +358,7 @@ def register(kernel):
         await event.edit(f'{CUSTOM_EMOJI["cloud"]} <b><a href="tg://user?id={user.id}">{get_display_name(user)}</a> разблокирован.</b>', parse_mode='html')
     
     @kernel.register_command('report')
-    # <ответ> - Пожаловаться на спам (только в ЛС)
     async def report_cmd(event):
-
-        from telethon.tl.types import User
-        from telethon.tl.functions.messages import ReportSpamRequest
-        
         chat = await event.get_chat()
         if not isinstance(chat, User):
             await event.edit(f"{CUSTOM_EMOJI['warning']} <b>Эта команда работает только в ЛС</b>", parse_mode='html')
@@ -379,9 +368,7 @@ def register(kernel):
         await event.edit("⚠️ <b>Отправил жалобу на спам!</b>", parse_mode='html')
     
     @kernel.register_command('newstatus')
-    # <название> <уведомления 0/1> <текст> - Создать новый статус
     async def newstatus_cmd(event):
-
         args = raw_text(event, strip_command=True).split(' ', 2)
         if len(args) < 3:
             await event.edit(f"{CUSTOM_EMOJI['warning']} <b>Аргументы некорректны</b>", parse_mode='html')
@@ -406,9 +393,7 @@ def register(kernel):
         )
     
     @kernel.register_command('delstatus')
-    # <название> - Удалить статус
     async def delstatus_cmd(event):
-
         args = event.text.split()
         if len(args) < 2:
             await event.edit(f"{CUSTOM_EMOJI['warning']} <b>Укажите название статуса</b>", parse_mode='html')
@@ -432,9 +417,7 @@ def register(kernel):
         await event.edit(f"<b>{CUSTOM_EMOJI['check']} Статус {name} удалён</b>", parse_mode='html')
     
     @kernel.register_command('statuses')
-    # Показать доступные статусы
     async def statuses_cmd(event):
-
         texts = kernel.config.get('dnd_texts', {})
         notifs = kernel.config.get('dnd_notif', {})
         
@@ -450,12 +433,7 @@ def register(kernel):
         await event.edit(res, parse_mode='html')
     
     @kernel.register_command('status')
-    # <название> [длительность] [доп.инфо] - Установить статус
     async def status_cmd(event):
-
-        from telethon.tl.functions.account import UpdateProfileRequest
-        from telethon.tl.functions.users import GetFullUserRequest
-        
         args = raw_text(event, strip_command=True).split(' ', 2)
         if len(args) < 1:
             await event.edit(f"{CUSTOM_EMOJI['warning']} <b>Укажите название статуса</b>", parse_mode='html')
@@ -472,7 +450,6 @@ def register(kernel):
         further = ""
         
         if len(args) > 1:
-            # Parse duration
             duration_str = args[1]
             duration = convert_time(duration_str) if re.match(r'\d+[a-zA-Z]', duration_str) else 0
             
@@ -494,12 +471,12 @@ def register(kernel):
         kernel.config['dnd_further'] = further
         
         if duration:
-            if '_unstatus_task' in globals():
+            if module_temp_data['unstatus_task']:
                 try:
-                    globals()['_unstatus_task'].cancel()
+                    module_temp_data['unstatus_task'].cancel()
                 except:
                     pass
-            globals()['_unstatus_task'] = asyncio.create_task(_unstatus_func(duration))
+            module_temp_data['unstatus_task'] = asyncio.create_task(_unstatus_func(duration))
             kernel.config['dnd_status_duration'] = time.time() + duration
         
         status_text = (
@@ -517,23 +494,21 @@ def register(kernel):
             bio = texts[name]
             if further:
                 bio += f" | {further}"
-            bio = bio[:70]  # Limit bio length
+            bio = bio[:70]
             await client(UpdateProfileRequest(about=bio))
         
         msg = await event.edit(status_text, parse_mode='html')
-        _sent_messages.append(msg)
+        module_temp_data['sent_messages'].append(msg)
     
     @kernel.register_command('unstatus')
-    # Снять статус
     async def unstatus_cmd(event):
-
         if not kernel.config.get('dnd_status'):
             await event.edit(f"{CUSTOM_EMOJI['warning']} <b>Нет активного статуса</b>", parse_mode='html')
             return
         
-        if '_unstatus_task' in globals():
+        if module_temp_data['unstatus_task']:
             try:
-                globals()['_unstatus_task'].cancel()
+                module_temp_data['unstatus_task'].cancel()
             except:
                 pass
         
@@ -543,7 +518,6 @@ def register(kernel):
         await msg.delete()
     
     async def message_watcher(event):
-        
         try:
             chat_id = event.chat_id
             me = await client.get_me()
@@ -551,7 +525,6 @@ def register(kernel):
             if chat_id in {1271266957, 777000, me.id}:
                 return
             
-            # PMBL handling
             if (kernel.config.get('dnd_pmbl_active') and 
                 isinstance(event.chat, User) and
                 not isinstance(event.chat, Channel)):
@@ -571,7 +544,6 @@ def register(kernel):
                     _approve(cid, "ignore_contacts")
                     return
                 
-                # Check first message
                 try:
                     first_msg = await client.get_messages(event.chat, limit=1, reverse=True)
                     if first_msg and first_msg[0].sender_id == me.id:
@@ -584,10 +556,9 @@ def register(kernel):
                 if active_peer:
                     return
                 
-                global _ratelimit_pmbl
-                _ratelimit_pmbl = [
-                    t for t in _ratelimit_pmbl 
-                    if t + _ratelimit_pmbl_timeout > time.time()
+                module_temp_data['ratelimit_pmbl'] = [
+                    t for t in module_temp_data['ratelimit_pmbl'] 
+                    if t + 300 > time.time()
                 ]
                 
                 contact = not (kernel.config.get('dnd_ignore_contacts') and sender.contact)
@@ -598,9 +569,8 @@ def register(kernel):
                 )
                 await _punish_handler(cid)
                 _approve(cid, "blocked")
-                logger.warning(f"Intruder punished: {cid}")
+                kernel.log_warning(f"Intruder punished: {cid}")
             
-            # AFK handling
             elif (kernel.config.get('dnd_status') and 
                   (isinstance(event.chat, User) or 
                    (kernel.config.get('dnd_afk_tag_whitelist') and 
@@ -608,7 +578,7 @@ def register(kernel):
                    (not kernel.config.get('dnd_afk_tag_whitelist') and 
                     chat_id not in kernel.config.get('dnd_afk_group_list', [])))):
                 
-                if chat_id in _ratelimit_afk:
+                if chat_id in module_temp_data['ratelimit_afk']:
                     return
                 
                 sender = await event.get_sender()
@@ -654,7 +624,7 @@ def register(kernel):
                         afk_string += f"\n<b><u>Буду AFK:</u></b>\n<code>{time_formatter(remaining, short=True)}</code>"
                 
                 m = await event.reply(afk_string, parse_mode='html')
-                _sent_messages.append(m)
+                module_temp_data['sent_messages'].append(m)
                 
                 if not kernel.config.get('dnd_notif', {}).get(status_name, False):
                     await client.send_read_acknowledge(
@@ -662,10 +632,32 @@ def register(kernel):
                         clear_mentions=True
                     )
                 
-                _ratelimit_afk.append(chat_id)
+                module_temp_data['ratelimit_afk'].append(chat_id)
                 
         except Exception as e:
-            logger.error(f"Error in DND watcher: {e}")
+            kernel.log_error(f"Error in DND watcher: {e}")
+    
+    async def unblock_callback(event):
+        if not kernel.is_admin(event.sender_id):
+            await event.answer("❌ Только админ может разблокировать!", alert=True)
+            return
+        
+        data = event.data.decode()
+        user_id = int(data.split('_')[-1])
+        
+        try:
+            await client(UnblockRequest(id=user_id))
+            await event.edit(
+                f"{CUSTOM_EMOJI['check']} <b>Пользователь разблокирован!</b>",
+                parse_mode='html',
+                buttons=None
+            )
+            await event.answer("✅ Пользователь разблокирован!")
+        except Exception as e:
+            kernel.log_error(f"Unblock failed: {e}")
+            await event.answer("❌ Ошибка разблокировки!", alert=True)
+    
+    kernel.register_callback_handler('dnd_unblock_', unblock_callback)
     
     client.on(events.NewMessage())(message_watcher)
     
