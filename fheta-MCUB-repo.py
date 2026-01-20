@@ -259,7 +259,10 @@ def register(kernel):
             if not bot_username:
                 await event.edit(f"{fheta._get_emoji('error')} <b>Инлайн-бот не настроен.</b>", parse_mode='html')
                 return
-            
+            await event.edit(
+            "<b>Ищу модуль</b> 🔎",
+            parse_mode='html'
+            )
             success, message = await kernel.inline_query_and_click(
                 chat_id=event.chat_id,
                 query=f'fheta {query}',
