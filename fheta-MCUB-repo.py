@@ -122,7 +122,7 @@ def register(kernel):
                 return {}
         
         def _fmt_mod(self, mod, query="", idx=1, total=1, inline=False):
-            info = f"<code>{self._escape_html(mod.get('name', ''))}</code> <b>от</b> <code>{self._escape_html(mod.get('author', '???'))}</code> <code>{self._escape_html(mod.get('version', '?.?.?'))}</code>\n{self._get_emoji('install')} <b>Команда для установки:</b> <code>{kernel.custom_prefix} {self._escape_html(mod.get('install', ''))}</code>"
+            info = f"<code>{self._escape_html(mod.get('name', ''))}</code> <b>от</b> <code>{self._escape_html(mod.get('author', '???'))}</code> <code>{self._escape_html(mod.get('version', '?.?.?'))}</code>\n{self._get_emoji('install')} <b>Команда для установки:</b> <code>{kernel.custom_prefix}{self._escape_html(mod.get('install', ''))}</code>"
             
             if total > 1:
                 info = f"{self._get_emoji('result')} <b>Результат {idx}/{total} по запросу:</b> <code>{self._escape_html(query)}</code>\n" + info
