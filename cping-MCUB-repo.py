@@ -59,7 +59,7 @@ def register(kernel):
         ping_result = await ping_api_telegram()
 
         if isinstance(ping_result, (int, float)):
-                ping_text = f"<b>📶 Пинг до Telegram API:</b> <code>{ping_result}</code> мс"
+            ping_text = f"<b>📶 Пинг до Telegram API:</b> <code>{ping_result}</code> мс"
         else:
             ping_text = f"<b>❌ Ошибка:</b> {ping_result}"
 
