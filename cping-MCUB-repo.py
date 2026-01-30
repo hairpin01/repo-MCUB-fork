@@ -64,10 +64,10 @@ def register(kernel):
             ping_text = f"<b>❌ Ошибка:</b> {ping_result}"
 
         await event.edit(ping_text, buttons=buttons, parse_mode='html')
-    buttons = [
-        [
-            Button.inline("Повторить", b"cping")
+        buttons = [
+            [
+                Button.inline("Повторить", b"cping")
+            ]
         ]
-    ]
 
     kernel.register_callback_handler("cping", callback_cping)
