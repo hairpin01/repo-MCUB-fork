@@ -1,3 +1,7 @@
+# requires:
+# author: @Hairpin00
+# version: 1.0.2
+# description: menu inline test
 from telethon import events, Button
 
 def register(kernel):
