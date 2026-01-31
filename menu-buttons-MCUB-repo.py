@@ -34,7 +34,8 @@ def register(kernel):
             ]
             await event.edit(
                 "menu 1 page <tg-emoji emoji-id=\"5404728536810398694\">🧊</tg-emoji>",
-                buttons=buttons
+                buttons=buttons,
+                parse_mode='html'
             )
         elif data == b'menu_page_2':
             buttons = [
@@ -47,7 +48,8 @@ def register(kernel):
             ]
             await event.edit(
                 "menu 2 page <tg-emoji emoji-id=\"5404728536810398694\">🧊</tg-emoji>",
-                buttons=buttons
+                buttons=buttons,
+                parse_mode='html'
             )
         elif data == b'menu_edit_1':
             buttons = [
@@ -57,7 +59,8 @@ def register(kernel):
             ]
             await event.edit(
                 "hello word <tg-emoji emoji-id=\"5404728536810398694\">🧊</tg-emoji>",
-                buttons=buttons
+                buttons=buttons,
+                parse_mode='html'
                 )
         elif data == b'menu_edit_2':
             buttons = [
@@ -67,7 +70,8 @@ def register(kernel):
             ]
             await event.edit(
                 "Привет мир <tg-emoji emoji-id=\"5404728536810398694\">🧊</tg-emoji>",
-                buttons=buttons
+                buttons=buttons,
+                parse_mode='html'
                 )
 
         else:
@@ -80,8 +84,9 @@ def register(kernel):
             ]
             ]
             await event.edit(
-                "menu",
+                "menu <tg-emoji emoji-id=\"5404728536810398694\">🧊</tg-emoji>",
                 buttons=buttons
+                parse_mode='html'
             )
     # register callback
     kernel.register_callback_handler("menu_", menu_callback_handler)
