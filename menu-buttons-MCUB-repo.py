@@ -89,7 +89,7 @@ def register(kernel):
             ]
             await event.edit(
                 "menu <tg-emoji emoji-id=\"5404728536810398694\">🧊</tg-emoji>",
-                buttons=buttons
+                buttons=buttons,
                 parse_mode='html'
             )
     # register callback
