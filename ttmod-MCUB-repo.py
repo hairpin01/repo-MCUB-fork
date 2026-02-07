@@ -1,5 +1,5 @@
 # requires: yt-dlp
-# author: MCUB Developer
+# author: @Hairpin00
 # version: 1.0.0
 # description: TikTok video downloader
 import asyncio
