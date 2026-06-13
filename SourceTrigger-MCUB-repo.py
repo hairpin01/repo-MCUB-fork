@@ -193,7 +193,29 @@ class SourceTriggerMod(ModuleBase):
         self.triggers: dict[str, list[dict | int]] = {}
         self.BATCH_SIZE: int = 200
         self._edited_msg_ids: set[int] = set()
+        self._outgoing_text_cache: dict[int, tuple[str, datetime]] = {}
         self.me = None
+
+    def _prune_outgoing_text_cache(self, now: datetime | None = None) -> None:
+        now = now or datetime.now(timezone.utc)
+        cutoff = now.timestamp() - 600
+        for msg_id, (_, ts) in list(self._outgoing_text_cache.items()):
+            if ts.timestamp() < cutoff:
+                self._outgoing_text_cache.pop(msg_id, None)
+
+    def _remember_outgoing_text(self, message: Message) -> None:
+        if not message or not message.out:
+            return
+        text = (message.raw_text or message.text or "").strip()
+        if not text:
+            return
+        ts = message.date or datetime.now(timezone.utc)
+        self._prune_outgoing_text_cache(ts)
+        self._outgoing_text_cache[message.id] = (text, ts)
+
+    def _cached_outgoing_text(self, message_id: int) -> str | None:
+        cached = self._outgoing_text_cache.get(message_id)
+        return cached[0] if cached else None
 
     async def _get_ignored_chats(self) -> list:
         raw = await self.db.db_get(self.name, "ignored_chats")
@@ -261,7 +283,13 @@ class SourceTriggerMod(ModuleBase):
         message = getattr(event, "message", None)
         if not message or not message.out or not message.text:
             return
+        if not getattr(message, "edit_date", None):
+            return
         if (datetime.now(timezone.utc) - message.date).total_seconds() > 300:
+            return
+        current_text = (message.raw_text or message.text or "").strip()
+        cached_text = self._cached_outgoing_text(message.id)
+        if cached_text is not None and cached_text == current_text:
             return
         self._edited_msg_ids.add(message.id)
         try:
@@ -278,6 +306,7 @@ class SourceTriggerMod(ModuleBase):
                 await asyncio.gather(*tasks)
         finally:
             self._edited_msg_ids.discard(message.id)
+            self._remember_outgoing_text(message)
 
     def _get_data_path(self) -> str:
         try:
@@ -841,6 +870,7 @@ class SourceTriggerMod(ModuleBase):
         message = event.message
         if not message.out or not message.text:
             return
+        self._remember_outgoing_text(message)
         chat_id = message.chat_id
         ignored = await self._get_ignored_chats()
         if chat_id in ignored:
