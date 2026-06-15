@@ -14,7 +14,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 
 class ProfilePlugin:
     name = "profile"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram profile tools"
 
@@ -22,6 +22,24 @@ class ProfilePlugin:
         "profile.get", "profile.get_full", "profile.get_me", "profile.update_name", "profile.update_bio",
         "profile.update_username", "profile.set_photo", "profile.download_photo", "profile.get_photos", "profile.common_chats",
     )
+
+    dangerous_tools = {
+        "profile.update_name", "profile.update_bio", "profile.update_username",
+        "profile.set_photo",
+    }
+
+    tool_docs = {
+        "profile.get": {"desc": "Get basic profile info for a user", "args": "target (str) or user (str) — username or ID", "body": "user identifier"},
+        "profile.get_full": {"desc": "Get full profile info (includes bio, photo, etc.)", "args": "target (str) or user (str) — username or ID", "body": "user identifier"},
+        "profile.get_me": {"desc": "Get your own profile info", "args": "none", "body": "not used"},
+        "profile.get_photos": {"desc": "List or download profile photos", "args": "target (str) or user (str); download (str) — set to 'true' to download", "body": "user identifier"},
+        "profile.common_chats": {"desc": "Find common chats with another user", "args": "target (str) or user (str)", "body": "user identifier"},
+        "profile.update_name": {"desc": "Update your first/last name", "args": "first_name (str); last_name (str) — optional", "body": "not used"},
+        "profile.update_bio": {"desc": "Update your profile bio/about", "args": "bio (str) or about (str) — new bio text", "body": "bio text"},
+        "profile.update_username": {"desc": "Change your Telegram username", "args": "username (str) — new username (without @)", "body": "not used"},
+        "profile.set_photo": {"desc": "Set your profile photo from a file", "args": "photo (str) or file (str) — path to image", "body": "not used"},
+        "profile.download_photo": {"desc": "Download a user's profile photo", "args": "target (str) or user (str)", "body": "user identifier"},
+    }
 
     tool_map = {
         "profile": "cmd_get",

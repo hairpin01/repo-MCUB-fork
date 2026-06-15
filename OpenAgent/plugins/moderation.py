@@ -8,7 +8,7 @@ from typing import Any
 
 class ModerationPlugin:
     name = "moderation"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram moderation tools"
 
@@ -16,6 +16,24 @@ class ModerationPlugin:
         "moderation.mute", "moderation.unmute", "moderation.ban", "moderation.unban", "moderation.kick",
         "moderation.promote", "moderation.demote", "moderation.pin", "moderation.delete_messages", "moderation.get_admins",
     )
+
+    dangerous_tools = {
+        "moderation.mute", "moderation.ban", "moderation.kick",
+        "moderation.promote", "moderation.demote", "moderation.pin", "moderation.delete_messages",
+    }
+
+    tool_docs = {
+        "moderation.mute": {"desc": "Mute a user in a chat", "args": "chat (str); user (str); until (int) — seconds (default 3600)", "body": "user identifier"},
+        "moderation.unmute": {"desc": "Unmute a user in a chat", "args": "chat (str); user (str)", "body": "user identifier"},
+        "moderation.ban": {"desc": "Ban a user from a chat", "args": "chat (str); user (str); reason (str) — optional", "body": "user identifier"},
+        "moderation.unban": {"desc": "Unban a user from a chat", "args": "chat (str); user (str)", "body": "user identifier"},
+        "moderation.kick": {"desc": "Kick a user from a chat (can rejoin)", "args": "chat (str); user (str); reason (str) — optional", "body": "user identifier"},
+        "moderation.promote": {"desc": "Promote a user to admin", "args": "chat (str); user (str); rank (str) — admin title", "body": "user identifier"},
+        "moderation.demote": {"desc": "Demote an admin back to member", "args": "chat (str); user (str)", "body": "user identifier"},
+        "moderation.pin": {"desc": "Pin a message in a chat", "args": "chat (str); message (str) or msg (str) — message ID", "body": "not used"},
+        "moderation.delete_messages": {"desc": "Delete multiple messages in a chat", "args": "chat (str); ids (str) — comma-separated IDs", "body": "not used"},
+        "moderation.get_admins": {"desc": "List admins of a chat", "args": "chat (str)", "body": "not used"},
+    }
 
     tool_map = {
         "mute_user": "cmd_mute",

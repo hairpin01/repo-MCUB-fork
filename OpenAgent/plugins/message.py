@@ -8,7 +8,7 @@ from typing import Any
 
 class MessagePlugin:
     name = "message"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram message tools"
 
@@ -17,6 +17,30 @@ class MessagePlugin:
         "message.delete", "message.pin", "message.react", "message.get", "message.search",
         "message.history", "message.mark_read", "message.typing", "message.schedule", "message.draft",
     )
+
+    dangerous_tools = {
+        "message.send_current", "message.send_target", "message.edit",
+        "message.forward", "message.delete", "message.pin",
+        "message.schedule", "message.draft",
+    }
+
+    tool_docs = {
+        "message.send_current": {"desc": "Send a message to the current chat", "args": "message (str) or text (str) — content", "body": "message text"},
+        "message.send_target": {"desc": "Send a message to a specific chat", "args": "chat (str) or to (str) — target; message (str) or text (str) — content", "body": "message text"},
+        "message.edit": {"desc": "Edit a previously sent message", "args": "message (str) or msg (str) — message ID or link", "body": "new text"},
+        "message.delete": {"desc": "Delete one or more messages", "args": "ids (str) — comma-separated IDs", "body": "not used"},
+        "message.history": {"desc": "Get recent messages from a chat", "args": "chat (str) — optional; limit (int) — max messages (default 20)", "body": "not used"},
+        "message.search": {"desc": "Search messages across chats", "args": "q (str) or query (str) — search text; chat (str) — optional scope", "body": "query text"},
+        "message.forward": {"desc": "Forward a message to another chat", "args": "from_chat (str); msg_id (int); to (str) — destination", "body": "not used"},
+        "message.pin": {"desc": "Pin a message in a chat", "args": "chat (str) — target; message (str) or msg (str) — message ID", "body": "not used"},
+        "message.reply": {"desc": "Reply to a message", "args": "chat (str); reply_to (int) — message ID; message (str) — content", "body": "reply text"},
+        "message.react": {"desc": "React to a message with an emoji", "args": "chat (str); message (str) or msg (str) — message ID; emoji (str) — reaction", "body": "not used"},
+        "message.get": {"desc": "Get a specific message by ID", "args": "chat (str); message (str) or msg (str) — message ID", "body": "not used"},
+        "message.mark_read": {"desc": "Mark messages as read in a chat", "args": "chat (str); max_id (int) — optional", "body": "not used"},
+        "message.typing": {"desc": "Show typing indicator in a chat", "args": "chat (str) — target chat", "body": "not used"},
+        "message.schedule": {"desc": "Schedule a message for later", "args": "chat (str); message (str) — content; schedule (int) — unix timestamp", "body": "message text"},
+        "message.draft": {"desc": "Save or update a draft message", "args": "chat (str); message (str) — draft text", "body": "draft text"},
+    }
 
     tool_map = {
         "send_message": "cmd_send",

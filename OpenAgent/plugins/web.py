@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 class WebPlugin:
     name = "web"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Web search and URL fetch tools"
 
@@ -31,6 +31,18 @@ class WebPlugin:
         "web.summarize_page": "cmd_web",
     }
 
+    tool_docs = {
+        "web.search": {"desc": "Search the web or fetch a URL", "args": "query (str) or q (str) or url (str) — search query or web page URL", "body": "query or URL"},
+        "web.fetch_url": {"desc": "Fetch and return text content of a URL", "args": "url (str) — the web page to fetch", "body": "URL"},
+        "web.read_html": {"desc": "Fetch a URL and extract readable text from HTML", "args": "url (str) — page to read", "body": "URL"},
+        "web.extract_links": {"desc": "Fetch a URL and extract all links", "args": "url (str) — page to scan", "body": "URL"},
+        "web.summarize_page": {"desc": "Fetch a URL and return its content as plain text", "args": "url (str) — page to summarize", "body": "URL"},
+    }
+
+    config_defaults = {
+        "timeout": 30,
+    }
+
     def __init__(self, agent: Any) -> None:
         self.agent = agent
 
@@ -42,10 +54,10 @@ class WebPlugin:
         return bool(_re.match(r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+(?:\/[^\s]*)?$", value))
 
     def _html_to_text(self, value: str) -> str:
-        value = re.sub(r"<script\\b[^>]*>.*?</script>", " ", value, flags=re.I | re.S)
-        value = re.sub(r"<style\\b[^>]*>.*?</style>", " ", value, flags=re.I | re.S)
+        value = re.sub(r"<script\b[^>]*>.*?</script>", " ", value, flags=re.I | re.S)
+        value = re.sub(r"<style\b[^>]*>.*?</style>", " ", value, flags=re.I | re.S)
         value = re.sub(r"<[^>]+>", " ", value)
-        value = re.sub(r"\\s+", " ", value)
+        value = re.sub(r"\s+", " ", value)
         value = re.sub(r"&amp;", "&", value)
         value = re.sub(r"&lt;", "<", value)
         value = re.sub(r"&gt;", ">", value)

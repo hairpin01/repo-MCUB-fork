@@ -17,7 +17,7 @@ from telethon.tl.types import ChatAdminRights, ChannelParticipantsAdmins
 
 class ChatPlugin:
     name = "chat"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram chat information and settings tools"
 
@@ -25,6 +25,23 @@ class ChatPlugin:
         "chat.info", "chat.participants", "chat.admins", "chat.permissions", "chat.common_with_user",
         "chat.set_title", "chat.set_about", "chat.set_username", "chat.slowmode", "chat.invite_link",
     )
+
+    dangerous_tools = {
+        "chat.set_title", "chat.set_about", "chat.set_username", "chat.slowmode",
+    }
+
+    tool_docs = {
+        "chat.info": {"desc": "Get info about a Telegram chat/group/channel", "args": "chat (str) or query (str) — username, ID, or link", "body": "chat identifier"},
+        "chat.participants": {"desc": "List participants in a chat", "args": "chat (str); limit (int) — max results (default 30)", "body": "chat identifier"},
+        "chat.admins": {"desc": "List admins of a chat", "args": "chat (str) — chat identifier", "body": "chat identifier"},
+        "chat.permissions": {"desc": "Get permissions of a chat", "args": "chat (str) — chat identifier", "body": "chat identifier"},
+        "chat.common_with_user": {"desc": "Find common chats with a user", "args": "user (str) — target user", "body": "user identifier"},
+        "chat.set_title": {"desc": "Change the title of a chat", "args": "chat (str) — target; title (str) — new title", "body": "title text"},
+        "chat.set_about": {"desc": "Change the description/about of a chat", "args": "chat (str) — target; about (str) or description (str) — new text", "body": "about text"},
+        "chat.set_username": {"desc": "Change the username of a chat/channel", "args": "chat (str) — target; username (str) — new username", "body": "not used"},
+        "chat.slowmode": {"desc": "Set slowmode interval in seconds", "args": "chat (str) — target; seconds (int) — slowmode delay", "body": "not used"},
+        "chat.invite_link": {"desc": "Get or create an invite link for a chat", "args": "chat (str) — target chat", "body": "not used"},
+    }
 
     tool_map = {
         "chat": "cmd_info",

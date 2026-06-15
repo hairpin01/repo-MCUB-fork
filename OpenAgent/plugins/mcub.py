@@ -8,7 +8,7 @@ from typing import Any
 
 class McubPlugin:
     name = "mcub"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "MCUB kernel command tools"
 
@@ -19,6 +19,16 @@ class McubPlugin:
         "mcub.install",
         "mcub.reload",
     )
+
+    dangerous_tools = {"mcub.command", "mcub.install", "mcub.reload"}
+
+    tool_docs = {
+        "mcub.command": {"desc": "Execute any MCUB userbot command", "args": "command (str) or cmd (str) — command text (prefix auto-added)", "body": "command text"},
+        "mcub.config": {"desc": "Get or set MCUB module configuration", "args": "command (str) or query (str) — config command like 'module.key=value'", "body": "config command"},
+        "mcub.modules": {"desc": "List loaded MCUB modules", "args": "command (str) or query (str)", "body": "not used"},
+        "mcub.install": {"desc": "Install a module from a repo URL", "args": "command (str) or query (str) — module URL or name", "body": "URL or name"},
+        "mcub.reload": {"desc": "Reload all modules (equivalent to .restart)", "args": "none", "body": "not used"},
+    }
 
     tool_map = {
         "mcub": "cmd_mcub",

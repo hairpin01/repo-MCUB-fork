@@ -14,7 +14,7 @@ from telethon.tl.functions.contacts import (
 
 class ContactsPlugin:
     name = "contacts"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram contacts tools"
 
@@ -25,6 +25,18 @@ class ContactsPlugin:
         "contacts.unblock",
         "contacts.entity",
     )
+
+    dangerous_tools = {
+        "contacts.add", "contacts.delete", "contacts.block", "contacts.unblock",
+    }
+
+    tool_docs = {
+        "contacts.add": {"desc": "Add a user to your contacts", "args": "user (str); first_name (str); last_name (str); phone (str)", "body": "user identifier"},
+        "contacts.delete": {"desc": "Delete a contact from your contacts list", "args": "user (str) — user to remove", "body": "user identifier"},
+        "contacts.block": {"desc": "Block a user", "args": "user (str) — user to block", "body": "user identifier"},
+        "contacts.unblock": {"desc": "Unblock a previously blocked user", "args": "user (str) — user to unblock", "body": "user identifier"},
+        "contacts.entity": {"desc": "Resolve a username or ID to entity info", "args": "user (str) — username or ID", "body": "user identifier"},
+    }
 
     tool_map = {
         "contacts.add": "cmd_add",

@@ -10,7 +10,7 @@ from typing import Any
 
 class TerminalPlugin:
     name = "terminal"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "CLI shell and file system tools"
 
@@ -29,6 +29,16 @@ class TerminalPlugin:
         "terminal.list_files": "cmd_list_files",
         "terminal.read_file": "cmd_read_file",
         "terminal.git_status": "cmd_git_status",
+    }
+
+    dangerous_tools = {"terminal.run", "terminal.inspect"}
+
+    tool_docs = {
+        "terminal.run": {"desc": "Run any shell command on the server", "args": "command (str) or cmd (str) — shell command to execute", "body": "command text"},
+        "terminal.inspect": {"desc": "Run an arbitrary shell command to inspect system state", "args": "command (str) or cmd (str) — command to run", "body": "command text"},
+        "terminal.list_files": {"desc": "List files and directories in a folder", "args": "path (str) — directory path (default: .)", "body": "path text"},
+        "terminal.read_file": {"desc": "Read a file (UTF-8, first 12k chars)", "args": "path (str) or file (str) — file to read", "body": "path text"},
+        "terminal.git_status": {"desc": "Show git status of the workspace", "args": "none", "body": "not used"},
     }
 
     config_defaults = {

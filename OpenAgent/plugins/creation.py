@@ -18,7 +18,7 @@ from telethon.tl.types import ChatAdminRights
 
 class CreationPlugin:
     name = "creation"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram channel/group/bot creation tools"
 
@@ -28,6 +28,17 @@ class CreationPlugin:
         "creation.bot",
         "creation.private_invite",
     )
+
+    dangerous_tools = {
+        "creation.channel", "creation.group", "creation.bot", "creation.private_invite",
+    }
+
+    tool_docs = {
+        "creation.channel": {"desc": "Create a Telegram channel", "args": "title (str) or name (str); about (str) or description (str)", "body": "title"},
+        "creation.group": {"desc": "Create a Telegram group", "args": "title (str) or name (str); about (str) or description (str)", "body": "title"},
+        "creation.bot": {"desc": "Create a Telegram bot via BotFather", "args": "name (str) or title (str); username (str) or bot (str); about (str)", "body": "not used"},
+        "creation.private_invite": {"desc": "Join a chat by invite link", "args": "link (str) — invite link", "body": "invite link"},
+    }
 
     tool_map = {
         "create_channel": "cmd_channel_or_group",

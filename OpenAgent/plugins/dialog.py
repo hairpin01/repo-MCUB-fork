@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from telethon.tl.functions.messages import ExportChatInviteRequest
 
 
 class DialogPlugin:
     name = "dialog"
-    version = "0.1.0"
+    version = "0.2.0"
     author = "@dev_dolbaeb"
     description = "Telegram dialog listing and management tools"
 
@@ -17,6 +18,23 @@ class DialogPlugin:
         "dialog.list_private", "dialog.list_groups", "dialog.list_all", "dialog.search", "dialog.archive",
         "dialog.unarchive", "dialog.leave", "dialog.export_invite", "dialog.get_photo", "dialog.set_photo",
     )
+
+    dangerous_tools = {
+        "dialog.archive", "dialog.unarchive", "dialog.leave", "dialog.set_photo",
+    }
+
+    tool_docs = {
+        "dialog.list_private": {"desc": "List private chats (PMs/DMs)", "args": "none", "body": "not used"},
+        "dialog.list_groups": {"desc": "List groups and channels", "args": "none", "body": "not used"},
+        "dialog.list_all": {"desc": "List all dialogs", "args": "none", "body": "not used"},
+        "dialog.search": {"desc": "Search dialogs by name", "args": "q (str) or query (str) — search term", "body": "search term"},
+        "dialog.archive": {"desc": "Archive a chat", "args": "chat (str) or id (str) — target", "body": "chat identifier"},
+        "dialog.unarchive": {"desc": "Unarchive a chat", "args": "chat (str) or id (str) — target", "body": "chat identifier"},
+        "dialog.leave": {"desc": "Leave a chat/group/channel", "args": "chat (str) or id (str) — target", "body": "chat identifier"},
+        "dialog.export_invite": {"desc": "Export an invite link for a chat", "args": "chat (str) — target chat", "body": "not used"},
+        "dialog.get_photo": {"desc": "Get the photo of a dialog", "args": "chat (str) — target", "body": "not used"},
+        "dialog.set_photo": {"desc": "Set the photo of a dialog", "args": "chat (str) — target; photo (str) — file path", "body": "not used"},
+    }
 
     tool_map = {
         "dialogs": "cmd_list",
