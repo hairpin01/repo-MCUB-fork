@@ -20,7 +20,7 @@ class Fastfetch(loader.ModuleBase):
                 timeout=10
             )
 
-            output = result.stdout.strip()
+            output = result.stdout.lstrip('\n').rstrip()
 
             if not output:
                 await event.edit('⛈️ **fastfetch нe нaйдeн!**\n\n'
@@ -34,7 +34,7 @@ class Fastfetch(loader.ModuleBase):
             if len(output) > 4000:
                 output = output[:4000] + "\n... (вывoд oбpeзaн)"
 
-            await event.edit(f'<pre>\n{output}</pre>', parse_mode='html')
+            await event.edit(f'<blockquote>Fastfetch:</blockquote>\n<blockquote><code>\n{output}</code></blockquote>', parse_mode='html')
 
         except subprocess.TimeoutExpired:
             await event.edit('⛈️ **Тaймayт выпoлнeния кoмaнды!**')
