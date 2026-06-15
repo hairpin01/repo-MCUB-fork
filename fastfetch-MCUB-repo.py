@@ -6,7 +6,7 @@ import core.lib.loader.module_base as loader
 class Fastfetch(loader.ModuleBase):
     name = 'fastfetch'
     description: dict = {'ru': 'вывoд инфopмaции o cиcтeмe чepeз fastfetch', 'en': 'display system information using fastfetch', 'linux': 'cmd: fastfetch on modules'}
-    version = '1.0.0'
+    version = '1.0.1'
     author = '@Hairpin00'
     
     @loader.command('fastfetch')
