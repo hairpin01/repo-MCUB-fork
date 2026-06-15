@@ -1,20 +1,17 @@
-
 from __future__ import annotations
-
 import json
 import re
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
+UTC = timezone.utc
+from typing import Any
 from telethon import events
 from telethon.tl.functions.channels import EditBannedRequest
 from telethon.tl.types import ChatBannedRights, PeerUser
-
 from core.lib.loader.module_base import ModuleBase, command
 
 
 def _parse_duration(s: str) -> timedelta | None:
-    """Parse '1min' / '2h' / '3d' / '1w' / '1m' into timedelta. Returns None on bad input."""
     m = re.fullmatch(r"(\d+)(min|h|d|w|m)", s.strip())
     if not m:
         return None
@@ -29,7 +26,6 @@ def _parse_duration(s: str) -> timedelta | None:
 
 
 def _fmt_duration(td: timedelta) -> str:
-    """Human-readable duration string (RU-style)."""
     s = int(td.total_seconds())
     if s < 60:
         return f"{s}s"
@@ -51,53 +47,52 @@ class Admin(ModuleBase):
         "en": "Admin tools: mute, ban, warn, and more.",
     }
 
-    # Max warns before auto-ban
     MAX_WARNS: int = 3
 
     strings = {
         "ru": {
-            "no_target": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Укажи цель: ответь на сообщение или укажи @username/ID.</blockquote>',
-            "no_duration": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Укажи срок (например: <code>1h</code>, <code>30min</code>, <code>2d</code>).</blockquote>',
-            "invalid_duration": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Неверный формат времени.\nПримеры: <code>1min</code>, <code>2h</code>, <code>3d</code>, <code>1w</code>, <code>1m</code>.</blockquote>',
-            "not_a_group": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Команда работает только в группах/супергруппах.</blockquote>',
-            "user_not_found": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Пользователь не найден.</blockquote>',
-            "error": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Ошибка: <code>{err}</code></blockquote>',
-            "muted": '<blockquote><a href="tg://emoji?id=5258267368877989660">🔇</a> <code>{user}</code> замучен на <code>{duration}</code>.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "muted_perm": '<blockquote><a href="tg://emoji?id=5258267368877989660">🔇</a> <code>{user}</code> замучен навсегда.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "unmuted": '<blockquote><a href="tg://emoji?id=5260325873688518261">🔊</a> <code>{user}</code> размучен.</blockquote>',
-            "banned": '<blockquote><a href="tg://emoji?id=5275969776668134187">⛔️</a> <code>{user}</code> забанен на <code>{duration}</code>.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "banned_perm": '<blockquote><a href="tg://emoji?id=5275969776668134187">⛔️</a> <code>{user}</code> забанен навсегда.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "unbanned": '<blockquote><a href="tg://emoji?id=5260726538302660868">✅</a> <code>{user}</code> разбанен.</blockquote>',
-            "warned": '<blockquote><a href="tg://emoji?id=5258474669769497337">❗️</a> <code>{user}</code> получает предупреждение ({count}/{max}).\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "warned_autoban": '<blockquote><a href="tg://emoji?id=5275969776668134187">⛔️</a> <code>{user}</code> — {count}/{max} предупреждений, выдан перманентный бан!\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "warn_removed": '<blockquote><a href="tg://emoji?id=5260726538302660868">✅</a> С <code>{user}</code> снято {removed} предупр. Осталось: <b>{count}</b>/{max}.</blockquote>',
-            "no_warns": '<blockquote><a href="tg://emoji?id=5429571366384842791">🔎</a> У <code>{user}</code> нет предупреждений.</blockquote>',
-            "kicked": '<blockquote><a href="tg://emoji?id=5260726538302660868">👢</a> <code>{user}</code> кикнут из чата.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Причина:<b> <code>{reason}</code></blockquote>',
-            "clean_start": '<blockquote><a href="tg://emoji?id=5429571366384842791">🔎</a> Ищу удалённые аккаунты...</blockquote>',
-            "clean_none": '<blockquote><a href="tg://emoji?id=5260726538302660868">✅</a> Удалённых аккаунтов не найдено.</blockquote>',
-            "clean_done": '<blockquote><a href="tg://emoji?id=5260726538302660868">🧹</a> Удалено аккаунтов: <b>{removed}</b> из <b>{total}</b> найденных.</blockquote>',
+            "no_target": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Укажи цель: ответь на сообщение или укажи @username/ID.</blockquote>',
+            "no_duration": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Укажи срок (например: <code>1h</code>, <code>30min</code>, <code>2d</code>).</blockquote>',
+            "invalid_duration": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Неверный формат времени.\nПримеры: <code>1min</code>, <code>2h</code>, <code>3d</code>, <code>1w</code>, <code>1m</code>.</blockquote>',
+            "not_a_group": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Команда работает только в группах/супергруппах.</blockquote>',
+            "user_not_found": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Пользователь не найден.</blockquote>',
+            "error": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Ошибка: <code>{err}</code></blockquote>',
+            "muted": '<blockquote><tg-emoji emoji-id="5258267368877989660">🔇</tg-emoji> <code>{user}</code> замучен на <code>{duration}</code>.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "muted_perm": '<blockquote><tg-emoji emoji-id="5258267368877989660">🔇</tg-emoji> <code>{user}</code> замучен навсегда.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "unmuted": '<blockquote><tg-emoji emoji-id="5260325873688518261">🔊</tg-emoji> <code>{user}</code> размучен.</blockquote>',
+            "banned": '<blockquote><tg-emoji emoji-id="5275969776668134187">⛔️</tg-emoji> <code>{user}</code> забанен на <code>{duration}</code>.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "banned_perm": '<blockquote><tg-emoji emoji-id="5275969776668134187">⛔️</tg-emoji> <code>{user}</code> забанен навсегда.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "unbanned": '<blockquote><tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> <code>{user}</code> разбанен.</blockquote>',
+            "warned": '<blockquote><tg-emoji emoji-id="5258474669769497337">❗️</tg-emoji> <code>{user}</code> получает предупреждение ({count}/{max}).\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "warned_autoban": '<blockquote><tg-emoji emoji-id="5275969776668134187">⛔️</tg-emoji> <code>{user}</code> — {count}/{max} предупреждений, выдан перманентный бан!\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "warn_removed": '<blockquote><tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> С <code>{user}</code> снято {removed} предупр. Осталось: <b>{count}</b>/{max}.</blockquote>',
+            "no_warns": '<blockquote><tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> У <code>{user}</code> нет предупреждений.</blockquote>',
+            "kicked": '<blockquote><tg-emoji emoji-id="5260726538302660868">👢</tg-emoji> <code>{user}</code> кикнут из чата.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Причина:<b> <code>{reason}</code></blockquote>',
+            "clean_start": '<blockquote><tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> Ищу удалённые аккаунты...</blockquote>',
+            "clean_none": '<blockquote><tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> Удалённых аккаунтов не найдено.</blockquote>',
+            "clean_done": '<blockquote><tg-emoji emoji-id="5260726538302660868">🧹</tg-emoji> Удалено аккаунтов: <b>{removed}</b> из <b>{total}</b> найденных.</blockquote>',
         },
         "en": {
-            "no_target": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Specify a target: reply to a message or provide @username/ID.</blockquote>',
-            "no_duration": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Specify a duration (e.g. <code>1h</code>, <code>30min</code>, <code>2d</code>).</blockquote>',
-            "invalid_duration": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Invalid time format.\nExamples: <code>1min</code>, <code>2h</code>, <code>3d</code>, <code>1w</code>, <code>1m</code>.</blockquote>',
-            "not_a_group": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> This command only works in groups/supergroups.</blockquote>',
-            "user_not_found": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> User not found.</blockquote>',
-            "error": '<blockquote><a href="tg://emoji?id=5260342697075416641">❌</a> Error: <code>{err}</code></blockquote>',
-            "muted": '<blockquote><a href="tg://emoji?id=5258267368877989660">🔇</a> <code>{user}</code> muted for <code>{duration}</code>.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "muted_perm": '<blockquote><a href="tg://emoji?id=5258267368877989660">🔇</a> <code>{user}</code> muted permanently.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "unmuted": '<blockquote><a href="tg://emoji?id=5260325873688518261">🔊</a> <code>{user}</code> unmuted.</blockquote>',
-            "banned": '<blockquote><a href="tg://emoji?id=5275969776668134187">⛔️</a> <code>{user}</code> banned for <code>{duration}</code>.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "banned_perm": '<blockquote><a href="tg://emoji?id=5275969776668134187">⛔️</a> <code>{user}</code> banned permanently.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "unbanned": '<blockquote><a href="tg://emoji?id=5260726538302660868">✅</a> <code>{user}</code> unbanned.</blockquote>',
-            "warned": '<blockquote><a href="tg://emoji?id=5258474669769497337">❗️</a> <code>{user}</code> warned ({count}/{max}).\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "warned_autoban": '<blockquote><a href="tg://emoji?id=5275969776668134187">⛔️</a> <code>{user}</code> — {count}/{max} warnings, permanent ban issued!\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "warn_removed": '<blockquote><a href="tg://emoji?id=5260726538302660868">✅</a> Removed {removed} warning(s) from <code>{user}</code>. Left: <b>{count}</b>/{max}.</blockquote>',
-            "no_warns": '<blockquote><a href="tg://emoji?id=5429571366384842791">🔎</a> <code>{user}</code> has no warnings.</blockquote>',
-            "kicked": '<blockquote><a href="tg://emoji?id=5260726538302660868">👢</a> <code>{user}</code> kicked from chat.\n<a href="tg://emoji?id=6010374833135688013">😵‍💫</a> <b>Reason:<b> <code>{reason}</code></blockquote>',
-            "clean_start": '<blockquote><a href="tg://emoji?id=5429571366384842791">🔎</a> Searching for deleted accounts...</blockquote>',
-            "clean_none": '<blockquote><a href="tg://emoji?id=5260726538302660868">✅</a> No deleted accounts found.</blockquote>',
-            "clean_done": '<blockquote><a href="tg://emoji?id=5260726538302660868">🧹</a> Removed accounts: <b>{removed}</b> of <b>{total}</b> found.</blockquote>',
+            "no_target": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Specify a target: reply to a message or provide @username/ID.</blockquote>',
+            "no_duration": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Specify a duration (e.g. <code>1h</code>, <code>30min</code>, <code>2d</code>).</blockquote>',
+            "invalid_duration": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Invalid time format.\nExamples: <code>1min</code>, <code>2h</code>, <code>3d</code>, <code>1w</code>, <code>1m</code>.</blockquote>',
+            "not_a_group": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> This command only works in groups/supergroups.</blockquote>',
+            "user_not_found": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> User not found.</blockquote>',
+            "error": '<blockquote><tg-emoji emoji-id="5260342697075416641">❌</tg-emoji> Error: <code>{err}</code></blockquote>',
+            "muted": '<blockquote><tg-emoji emoji-id="5258267368877989660">🔇</tg-emoji> <code>{user}</code> muted for <code>{duration}</code>.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "muted_perm": '<blockquote><tg-emoji emoji-id="5258267368877989660">🔇</tg-emoji> <code>{user}</code> muted permanently.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "unmuted": '<blockquote><tg-emoji emoji-id="5260325873688518261">🔊</tg-emoji> <code>{user}</code> unmuted.</blockquote>',
+            "banned": '<blockquote><tg-emoji emoji-id="5275969776668134187">⛔️</tg-emoji> <code>{user}</code> banned for <code>{duration}</code>.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "banned_perm": '<blockquote><tg-emoji emoji-id="5275969776668134187">⛔️</tg-emoji> <code>{user}</code> banned permanently.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "unbanned": '<blockquote><tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> <code>{user}</code> unbanned.</blockquote>',
+            "warned": '<blockquote><tg-emoji emoji-id="5258474669769497337">❗️</tg-emoji> <code>{user}</code> warned ({count}/{max}).\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "warned_autoban": '<blockquote><tg-emoji emoji-id="5275969776668134187">⛔️</tg-emoji> <code>{user}</code> — {count}/{max} warnings, permanent ban issued!\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "warn_removed": '<blockquote><tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> Removed {removed} warning(s) from <code>{user}</code>. Left: <b>{count}</b>/{max}.</blockquote>',
+            "no_warns": '<blockquote><tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> <code>{user}</code> has no warnings.</blockquote>',
+            "kicked": '<blockquote><tg-emoji emoji-id="5260726538302660868">👢</tg-emoji> <code>{user}</code> kicked from chat.\n<tg-emoji emoji-id="6010374833135688013">😵‍💫</tg-emoji> <b>Reason:<b> <code>{reason}</code></blockquote>',
+            "clean_start": '<blockquote><tg-emoji emoji-id="5429571366384842791">🔎</tg-emoji> Searching for deleted accounts...</blockquote>',
+            "clean_none": '<blockquote><tg-emoji emoji-id="5260726538302660868">✅</tg-emoji> No deleted accounts found.</blockquote>',
+            "clean_done": '<blockquote><tg-emoji emoji-id="5260726538302660868">🧹</tg-emoji> Removed accounts: <b>{removed}</b> of <b>{total}</b> found.</blockquote>',
         },
     }
 
@@ -106,13 +101,6 @@ class Admin(ModuleBase):
         event: events.NewMessage.Event,
         args: list[str],
     ) -> tuple[Any | None, list[str]]:
-        """
-        Resolve the target user and return remaining args.
-
-        Priority:
-          1. Replied-to message sender (args untouched — they're duration/reason).
-          2. First arg is @username or numeric ID (consumed from args).
-        """
         if event.reply_to_msg_id:
             try:
                 reply = await event.get_reply_message()
@@ -139,13 +127,6 @@ class Admin(ModuleBase):
         event: events.NewMessage.Event,
         uid: int,
     ) -> Any | None:
-        """
-        Resolve a bare numeric user ID to a full entity.
-
-        A raw ID is not resolvable on its own — Telethon needs the user's
-        access_hash. We first try the global cache, then fall back to scanning
-        the current chat's participants, where the access_hash is always present.
-        """
         try:
             return await self.client.get_entity(PeerUser(uid))
         except Exception:
@@ -161,7 +142,6 @@ class Admin(ModuleBase):
         return None
 
     def _user_link(self, user: Any) -> str:
-        """HTML mention that works even for users without @username."""
         name = (
             getattr(user, "first_name", None)
             or getattr(user, "title", None)
@@ -190,11 +170,6 @@ class Admin(ModuleBase):
         doc_en="Mute user. Usage: mute {target} {duration} {reason}",
     )
     async def cmd_mute(self, event: events.NewMessage.Event) -> None:
-        """
-        mute {ID/@username/reply} {срок} {причина}
-
-        Срок: 1min / 2h / 3d / 1w / 1m
-        """
         if not event.is_group:
             await self._edit(event, self.strings["not_a_group"])
             return
@@ -206,44 +181,50 @@ class Admin(ModuleBase):
             await self._edit(event, self.strings["no_target"])
             return
 
-        if not rest:
-            await self._edit(event, self.strings["no_duration"])
-            return
+        td: timedelta | None = None
+        until: datetime | None = None
+        reason = "—"
 
-        td = _parse_duration(rest[0])
-        if td is None:
-            await self._edit(event, self.strings["invalid_duration"])
-            return
-
-        reason = " ".join(rest[1:]) or "—"
-        until = datetime.now(tz=UTC) + td
+        if rest:
+            td = _parse_duration(rest[0])
+            if td:
+                until = datetime.now(tz=timezone.utc) + td
+                reason = " ".join(rest[1:]) or "—"
+            else:
+                reason = " ".join(rest) or "—"
 
         try:
-            await self.client(
-                EditBannedRequest(
-                    event.chat_id,
-                    user,
-                    ChatBannedRights(
-                        until_date=until,
-                        send_messages=True,
-                        send_media=True,
-                        send_stickers=True,
-                        send_gifs=True,
-                        send_games=True,
-                        send_inline=True,
-                        embed_links=True,
+            await self.client(EditBannedRequest(
+                event.chat_id,
+                user,
+                ChatBannedRights(
+                    until_date=until,
+                    send_messages=True,
+                    send_media=True,
+                    send_stickers=True,
+                    send_gifs=True,
+                    send_games=True,
+                    send_inline=True,
+                    embed_links=True,
+                ),
+            ))
+            if td:
+                await self._edit(
+                    event,
+                    self.strings("muted",
+                        user=self._user_link(user),
+                        duration=_fmt_duration(td),
+                        reason=reason,
                     ),
                 )
-            )
-            await self._edit(
-                event,
-                self.strings(
-                    "muted",
-                    user=self._user_link(user),
-                    duration=_fmt_duration(td),
-                    reason=reason,
-                ),
-            )
+            else:
+                await self._edit(
+                    event,
+                    self.strings("muted_perm",
+                        user=self._user_link(user),
+                        reason=reason,
+                    ),
+                )
         except Exception as e:
             await self._edit(event, self.strings("error", err=str(e)))
 
