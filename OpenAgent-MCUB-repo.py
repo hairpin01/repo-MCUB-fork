@@ -4157,6 +4157,64 @@ class _OpenAgentToolRegistryMixin:
             return self.strings("skill_saved", name=saved)
         return self.strings("unknown_skills_tool", tool=tool_name)
 
+    async def _code_registry_tool(
+        self,
+        tool_name: str,
+        attrs_raw: str,
+        body: str,
+        source_event: Any | None = None,
+    ) -> str:
+        """Handle code tools advertised in the OpenAgent tool registry."""
+        await asyncio.sleep(0)
+        attrs = self._parse_xml_attrs(attrs_raw)
+        name = attrs.get("name") or attrs.get("path") or attrs.get("file") or "generated.py"
+        content = body or attrs.get("content") or ""
+
+        if tool_name == "code.choose_filename":
+            filename = self._safe_generated_filename(name or content or "generated.py")
+            self._last_generated_file = {"name": filename, "content": content}
+            return filename
+
+        if tool_name == "code.generate_file":
+            filename = self._safe_generated_filename(name)
+            if not content.strip():
+                return "File content is required in tool body"
+            self._last_generated_file = {"name": filename, "content": content}
+            return f"Generated file prepared: {filename} ({len(content)} chars)"
+
+        if tool_name == "code.generate_mcub_module":
+            filename = self._safe_generated_filename(name)
+            if not filename.endswith(".py"):
+                filename = self._safe_generated_filename(f"{Path(filename).stem}.py")
+            if not content.strip():
+                return "MCUB module code is required in tool body"
+            self._last_generated_file = {"name": filename, "content": content}
+            return f"MCUB module prepared: {filename} ({len(content)} chars)"
+
+        if tool_name == "code.attach_result":
+            latest = getattr(self, "_last_generated_file", None)
+            if not latest:
+                return "No generated file is available to attach"
+            filename = self._safe_generated_filename(str(latest.get("name") or "generated.py"))
+            content = str(latest.get("content") or "")
+            if not content:
+                return "Generated file is empty"
+            if source_event is None:
+                return f"Generated file ready: {filename} ({len(content)} chars)"
+            try:
+                data = io.BytesIO(content.encode("utf-8"))
+                data.name = filename
+                await self.client.send_file(
+                    getattr(source_event, "chat_id", None) or source_event,
+                    data,
+                    caption=f"Generated file: {filename}",
+                )
+                return f"Generated file attached: {filename}"
+            except Exception as exc:
+                return f"Attach failed: {exc}"
+
+        return "Unknown code tool"
+
     async def _context_registry_tool(self, tool_name: str, attrs_raw: str, body: str, source_event: Any | None) -> str:
         chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
         if tool_name == "context.clear":
@@ -4387,8 +4445,8 @@ class _OpenAgentToolRegistryMixin:
         core = {
             # Core tools tightly coupled with module internals.
             "thinking.note": "_thinking_note_tool",
-            "skill": "_save_skill",
-            "skill.save": "_save_skill",
+            "skill": "_skills_registry_tool",
+            "skill.save": "_skills_registry_tool",
             "skills.list": "_skills_registry_tool",
             "skills.read": "_skills_registry_tool",
             "skills.activate": "_skills_registry_tool",
