@@ -51,7 +51,6 @@ class MessagePlugin:
         "message.history": "cmd_history",
         "search_messages": "cmd_search",
         "message.search": "cmd_search",
-        "chat.search": "cmd_search",
         "message.delete": "cmd_delete",
         "delete_messages": "cmd_delete",
         "message.forward": "cmd_forward",

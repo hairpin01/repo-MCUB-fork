@@ -59,7 +59,6 @@ class ChatPlugin:
         "chat.set_title": "cmd_title",
         "set_chat_about": "cmd_about",
         "chat.set_about": "cmd_about",
-        "join_chat": "cmd_join",
     }
 
     def __init__(self, agent: Any) -> None:
@@ -105,7 +104,21 @@ class ChatPlugin:
             return f"Participants failed: {exc}"
 
     async def cmd_search(self, attrs_raw: str, body: str, source_event: Any) -> str:
-        return await self.agent._search_messages_tool(attrs_raw, body, source_event)
+        attrs = self.agent._parse_xml_attrs(attrs_raw)
+        query = attrs.get("q") or attrs.get("query") or attrs.get("text") or body.strip()
+        if not query:
+            return "Search query is required"
+        limit = max(1, min(int(attrs.get("limit", "20") or 20), 100))
+        chat = await self.agent._resolve_tool_chat(attrs.get("chat"), source_event)
+        try:
+            lines = []
+            async for msg in self.agent.client.iter_messages(chat, search=query, limit=limit):
+                sender = getattr(msg, "sender_id", "?")
+                text = (getattr(msg, "raw_text", None) or getattr(msg, "text", "") or "").replace("\n", " ")
+                lines.append(f"#{getattr(msg, 'id', '?')} from {sender}: {text[:180]}")
+            return "\n".join(lines) if lines else "No messages found"
+        except Exception as exc:
+            return f"Chat search failed: {exc}"
 
     async def cmd_admins(self, attrs_raw: str, body: str, source_event: Any) -> str:
         attrs = self.agent._parse_xml_attrs(attrs_raw)

@@ -57,7 +57,11 @@ class TerminalPlugin:
     async def on_load(self) -> None:
         pass
 
-    async def cmd_run(self, command: str) -> str:
+    async def cmd_run(self, attrs_raw: str = "", body: str = "") -> str:
+        attrs = self.agent._parse_xml_attrs(attrs_raw)
+        command = attrs.get("command") or attrs.get("cmd") or body.strip()
+        if not command:
+            return "Command is required"
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=self.agent._workspace_dir(),
