@@ -6,7 +6,7 @@ import core.lib.loader.module_base as loader
 class Fastfetch(loader.ModuleBase):
     name = 'fastfetch'
     description: dict = {'ru': 'вывoд инфopмaции o cиcтeмe чepeз fastfetch', 'en': 'display system information using fastfetch', 'linux': 'cmd: fastfetch on modules'}
-    version = '1.0.0'
+    version = '1.0.1'
     author = '@Hairpin00'
     
     @loader.command('fastfetch')
@@ -20,7 +20,7 @@ class Fastfetch(loader.ModuleBase):
                 timeout=10
             )
 
-            output = result.stdout.strip()
+            output = result.stdout.lstrip('\n').rstrip()
 
             if not output:
                 await event.edit('⛈️ **fastfetch нe нaйдeн!**\n\n'
@@ -34,7 +34,7 @@ class Fastfetch(loader.ModuleBase):
             if len(output) > 4000:
                 output = output[:4000] + "\n... (вывoд oбpeзaн)"
 
-            await event.edit(f'<pre>\n{output}</pre>', parse_mode='html')
+            await event.edit(f'<blockquote>Fastfetch:</blockquote>\n<blockquote><code>\n{output}</code></blockquote>', parse_mode='html')
 
         except subprocess.TimeoutExpired:
             await event.edit('⛈️ **Тaймayт выпoлнeния кoмaнды!**')
