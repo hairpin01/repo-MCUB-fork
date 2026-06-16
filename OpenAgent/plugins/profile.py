@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from telethon.tl.functions.account import (
     UpdateProfileRequest,
@@ -187,7 +188,6 @@ class ProfilePlugin:
         if not fpath.is_file():
             return f"File not found: {fpath}"
         try:
-            from pathlib import Path as P
             uploaded = await self.agent.client.upload_file(str(fpath))
             await self.agent.client(UploadProfilePhotoRequest(uploaded))
             return f"Profile photo updated: {fpath.name}"
