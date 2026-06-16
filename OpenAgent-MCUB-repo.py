@@ -1,5 +1,5 @@
 # -- repo data --
-# scop: kernel min v1.3.0
+# scop: kernel min v1.4.2
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # -- end --
 # SPDX-License-Identifier: MIT
@@ -22,11 +22,13 @@ import tempfile
 import time
 import uuid
 import json
+import sys
+from dataclasses import dataclass, field
 import importlib
 import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, urlparse
 
 import aiohttp
@@ -74,6 +76,168 @@ from core.lib.loader.module_config import (
 )
 
 
+@dataclass
+class OASession:
+    """Single named conversation thread within a Telegram chat."""
+    id: str
+    name: str
+    chat_id: int
+    created_at: float
+    updated_at: float
+    messages: list[dict[str, str]] = field(default_factory=list)
+    model: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "chat_id": self.chat_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "messages": self.messages,
+            "model": self.model,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "OASession":
+        return cls(
+            id=str(d.get("id", "")),
+            name=str(d.get("name", "New chat")),
+            chat_id=int(d.get("chat_id", 0)),
+            created_at=float(d.get("created_at", 0)),
+            updated_at=float(d.get("updated_at", 0)),
+            messages=list(d.get("messages") or []),
+            model=str(d.get("model") or "") or None,
+        )
+
+
+class SessionManager:
+    """Plain service for OpenAgent chat sessions and persistence."""
+
+    def __init__(
+        self,
+        sessions_file: Path,
+        *,
+        logger: Any,
+        model_getter: Callable[[], str],
+        default_name_getter: Callable[[], str],
+        session_limit: int,
+    ) -> None:
+        self.sessions_file = sessions_file
+        self.sessions_file.parent.mkdir(parents=True, exist_ok=True)
+        self.log = logger
+        self._model_getter = model_getter
+        self._default_name_getter = default_name_getter
+        self._session_limit = session_limit
+        self.sessions: dict[str, OASession] = {}
+        self.active_session: dict[int, str] = {}
+        self.session_prefs: dict[int, str] = {}
+
+    async def load(self) -> None:
+        """Load persisted sessions without replacing public dict objects."""
+        if not self.sessions_file.exists():
+            return
+        try:
+            data = json.loads(self.sessions_file.read_text(encoding="utf-8"))
+            self.sessions.clear()
+            self.active_session.clear()
+            self.session_prefs.clear()
+            for raw in data.get("sessions", []):
+                session = OASession.from_dict(raw)
+                if session.id and session.chat_id:
+                    self.sessions[session.id] = session
+            for chat_id_str, session_id in data.get("active", {}).items():
+                cid = int(chat_id_str)
+                if session_id in self.sessions:
+                    self.active_session[cid] = session_id
+            for chat_id_str, pref in data.get("prefs", {}).items():
+                if pref in {"ask", "continue", "new"}:
+                    self.session_prefs[int(chat_id_str)] = pref
+        except Exception as exc:
+            self.log.warning(f"OpenAgent: failed to load sessions: {exc}")
+
+    async def save(self) -> None:
+        """Persist sessions to disk."""
+        try:
+            data = {
+                "sessions": [s.to_dict() for s in self.sessions.values()],
+                "active": {str(k): v for k, v in self.active_session.items()},
+                "prefs": {str(k): v for k, v in self.session_prefs.items()},
+            }
+            self.sessions_file.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as exc:
+            self.log.warning(f"OpenAgent: failed to save sessions: {exc}")
+
+    def schedule_save(self) -> None:
+        loop: asyncio.AbstractEventLoop | None = None
+        with contextlib.suppress(RuntimeError):
+            loop = asyncio.get_running_loop()
+        if loop is None:
+            with contextlib.suppress(RuntimeError):
+                loop = asyncio.get_event_loop()
+        if loop is None or loop.is_closed():
+            return
+        loop.call_soon(lambda: asyncio.ensure_future(self.save()))
+
+    def new_session(self, chat_id: int, name: str | None = None) -> OASession:
+        """Create a fresh session and make it active for chat_id."""
+        session = OASession(
+            id=str(uuid.uuid4()),
+            name=name or self._default_name_getter(),
+            chat_id=chat_id,
+            created_at=time.time(),
+            updated_at=time.time(),
+            model=self._model_getter(),
+        )
+        self.sessions[session.id] = session
+        self.active_session[chat_id] = session.id
+        self.enforce_limit(chat_id)
+        self.touch_session(session)
+        return session
+
+    def get_active_session(self, chat_id: int) -> OASession:
+        """Return active session for chat_id, creating one if needed."""
+        session_id = self.active_session.get(chat_id)
+        if session_id and session_id in self.sessions:
+            return self.sessions[session_id]
+        return self.new_session(chat_id)
+
+    def get_chat_sessions(self, chat_id: int) -> list[OASession]:
+        """Return all sessions for a chat, sorted newest-first."""
+        return sorted(
+            (s for s in self.sessions.values() if s.chat_id == chat_id),
+            key=lambda s: s.updated_at,
+            reverse=True,
+        )
+
+    def enforce_limit(self, chat_id: int) -> None:
+        """Keep at most session_limit sessions per chat, pruning oldest."""
+        chat_sessions = self.get_chat_sessions(chat_id)
+        for session in chat_sessions[self._session_limit:]:
+            self.sessions.pop(session.id, None)
+
+    def touch_session(self, session: OASession) -> None:
+        session.updated_at = time.time()
+        session.model = session.model or self._model_getter()
+        self.schedule_save()
+
+    def set_active_session(self, chat_id: int, session_id: str) -> OASession | None:
+        session = self.sessions.get(session_id)
+        if session is None or session.chat_id != chat_id:
+            return None
+        self.active_session[chat_id] = session.id
+        self.schedule_save()
+        return session
+
+    def set_preference(self, chat_id: int, pref: str) -> None:
+        if pref not in {"ask", "continue", "new"}:
+            return
+        self.session_prefs[chat_id] = pref
+        self.schedule_save()
+
+
 class OpenAgentPlugin:
     """Base class for OpenAgent plugins."""
     name: str = ""
@@ -81,516 +245,24 @@ class OpenAgentPlugin:
     tool_registry: tuple[str, ...] = ()
     tool_map: dict[str, str] = {}
     config_defaults: dict[str, object] = {}
-    
+
     def __init__(self, agent: "OpenAgent") -> None:
         self._agent = agent
-    
+
     @property
     def agent(self) -> "OpenAgent":
         return self._agent
-    
+
     async def on_load(self) -> None:
         """Called after plugin is registered."""
         pass
 
-class OpenAgent(ModuleBase):
-    name = "OpenAgent"
-    version = "0.6.5"
-    author = "@dev_dolbaeb"
-    description = {
-        "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",
-        "en": "AI agent in userbot with refreshed tool architecture",
-    }
 
-    strings = {
-        "ru": {
-            "need_text": "Usage: .oa <request>",
-            "thinking": "Thinking...",
-            "running_terminal": "Running terminal command...",
-            "running_search": "Searching the web...",
-            "no_key": "API key is not configured. Use .cfg OpenAgent api_key",
-            "bad_provider": "Unknown provider. Available: {providers}",
-            "provider_saved": "Provider saved: {provider}",
-            "key_saved": "Provider and API key saved: {provider}",
-            "disabled": "Provider {provider} is not available yet",
-            "error": "OpenAgent error: {error}",
-        },
-        "en": {
-            "need_text": "Usage: .oa <request>",
-            "thinking": "Thinking...",
-            "running_terminal": "Running terminal command...",
-            "running_search": "Searching the web...",
-            "no_key": "API key is not configured. Use .cfg OpenAgent api_key",
-            "bad_provider": "Unknown provider. Available: {providers}",
-            "provider_saved": "Provider saved: {provider}",
-            "key_saved": "Provider and API key saved: {provider}",
-            "disabled": "Provider {provider} is not available yet",
-            "error": "OpenAgent error: {error}",
-        },
-    }
 
-    PROVIDERS = (
-        "openai",
-        "google",
-        "openrouter",
-        "groq",
-        "deepseek",
-        "xai",
-        "other",
-    )
-    PROVIDER_LABELS = {
-        "openai": "OpenAI",
-        "google": "Google",
-        "openrouter": "OpenRouter",
-        "groq": "Groq",
-        "deepseek": "DeepSeek",
-        "xai": "xAI",
-        "other": "Other",
-    }
-    DEFAULT_MODELS = {
-        "openai": "gpt-5.5",
-        "google": "gemini-1.5-flash",
-        "openrouter": "openai/gpt-4o-mini",
-        "groq": "llama-3.3-70b-versatile",
-        "deepseek": "deepseek-chat",
-        "xai": "grok-2-latest",
-        "other": "gpt-4o-mini",
-    }
-    BASE_URLS = {
-        "openai": "https://api.openai.com/v1",
-        "google": "https://generativelanguage.googleapis.com/v1beta",
-        "openrouter": "https://openrouter.ai/api/v1",
-        "groq": "https://api.groq.com/openai/v1",
-        "deepseek": "https://api.deepseek.com/v1",
-        "xai": "https://api.x.ai/v1",
-    }
-    WEB_SEARCH_RE = re.compile(
-        r"<web_search>\s*(.*?)\s*</web_search>", re.DOTALL | re.I
-    )
-    SEND_RE = re.compile(
-        r'<send_message(?:\s+chat=["\']([^"\']+)["\'])?\s*>(.*?)</send_message>',
-        re.DOTALL | re.I,
-    )
-    SKILL_RE = re.compile(
-        r'<skill\s+name=["\']([^"\']+)["\']\s*>(.*?)</skill>', re.DOTALL | re.I
-    )
-    CREATE_CHANNEL_RE = re.compile(
-        r"<create_channel([^>]*)>(.*?)</create_channel>", re.DOTALL | re.I
-    )
-    CREATE_GROUP_RE = re.compile(
-        r"<create_group([^>]*)>(.*?)</create_group>", re.DOTALL | re.I
-    )
-    CREATE_BOT_RE = re.compile(
-        r"<create_bot([^>]*)>(.*?)</create_bot>", re.DOTALL | re.I
-    )
-    SEARCH_MESSAGES_RE = re.compile(
-        r"<search_messages([^>]*)>(.*?)</search_messages>", re.DOTALL | re.I
-    )
-    UPDATE_PROFILE_RE = re.compile(
-        r"<update_profile([^>]*)>(.*?)</update_profile>", re.DOTALL | re.I
-    )
-    SET_PROFILE_PHOTO_RE = re.compile(
-        r"<set_profile_photo([^>]*)>(.*?)</set_profile_photo>", re.DOTALL | re.I
-    )
-    DELETE_MESSAGES_RE = re.compile(
-        r"<delete_messages([^>]*)>(.*?)</delete_messages>", re.DOTALL | re.I
-    )
-    FORWARD_MESSAGE_RE = re.compile(
-        r"<forward_message([^>]*)>(.*?)</forward_message>", re.DOTALL | re.I
-    )
-    DOWNLOAD_MEDIA_RE = re.compile(
-        r"<download_media([^>]*)>(.*?)</download_media>", re.DOTALL | re.I
-    )
-    GENERATED_FILE_RE = re.compile(
-        r'<file\s+name=["\']([^"\']+)["\']\s*>(.*?)</file>',
-        re.DOTALL | re.I,
-    )
-    MCUB_DOCS_URL = "https://x0.at/y2rb.md"
-    TOOL_CALL_RE = re.compile(r"<([a-z0-9._]+)([^>]*)>(.*?)</\1>|<([a-z0-9._]+)([^>]*)/?>", re.DOTALL | re.I)
-    TOOL_CALL_JSON_RE = re.compile(r"```tool_call\s*(.*?)```", re.DOTALL | re.I)
-    TOOL_REGISTRY = (
-        # Core/module-tied tools. Most tools should come from plugins.
-        "thinking.note",
-        "skills.list", "skills.read", "skills.activate", "skills.import_md", "skills.export_md", "skills.save_from_ai", "skills.install", "skills.repo_list",
-        "code.generate_file", "code.generate_mcub_module", "code.choose_filename", "code.attach_result", "code.read_docs",
-        "context.remember", "context.clear", "context.regenerate", "context.reply_context", "context.media_context",
-        "todo.add", "todo.delete", "todo.edit", "todo.current", "todo.close", "todo.closeall", "todo.clear",
-        "utility.token_usage", "utility.placeholders", "utility.random_template", "utility.agent_log", "utility.error_file",
-    )
-    AGENT_MAX_STEPS = 15
 
-    config = ModuleConfig(
-        ConfigValue(
-            "provider",
-            "openai",
-            description="Provider: openai, google, openrouter, groq, deepseek, xai, other",
-            validator=Choice(choices=list(PROVIDERS), default="openai"),
-        ),
-        ConfigValue(
-            "api_key",
-            "",
-            description="API key for the selected provider",
-            validator=Secret(default=""),
-        ),
-        ConfigValue(
-            "model",
-            "",
-            description="Model name. Empty means provider default",
-            validator=String(default=""),
-        ),
-        ConfigValue(
-            "custom_base_url",
-            "",
-            description="Endpoint for provider=other, e.g. https://api.deepseek.com/v1",
-            validator=String(default=""),
-        ),
-        ConfigValue(
-            "system_prompt",
-            "You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed.",
-            description="System prompt for the agent",
-            validator=String(
-                default="You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed."
-            ),
-        ),
-        ConfigValue(
-            "temperature",
-            0.7,
-            description="Sampling temperature",
-            validator=Float(default=0.7, min=0.0, max=2.0),
-        ),
-        ConfigValue(
-            "max_tokens",
-            1200,
-            description="Maximum response tokens",
-            validator=Integer(default=1200, min=64, max=32768),
-        ),
-        ConfigValue(
-            "reasoning_effort",
-            "off",
-            description="Reasoning effort for models/providers that support it: off, low, medium, high, xhigh",
-            validator=Choice(choices=["off", "low", "medium", "high", "xhigh"], default="off"),
-        ),
-        ConfigValue(
-            "timeout",
-            180,
-            description="HTTP timeout seconds for each provider request. Increase for slow reasoning/code tasks.",
-            validator=Integer(default=180, min=10, max=600),
-        ),
-        ConfigValue(
-            "terminal_enabled",
-            True,
-            description="Allow the agent to execute terminal commands",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "terminal_steps",
-            3,
-            description="Maximum terminal commands per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "terminal_timeout",
-            30,
-            description="Terminal command timeout seconds",
-            validator=Integer(default=30, min=3, max=120),
-        ),
-        ConfigValue(
-            "web_search_enabled",
-            True,
-            description="Allow the agent to search the web",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "web_search_steps",
-            3,
-            description="Maximum web searches per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "mcub_use",
-            False,
-            description="Allow the agent to execute MCUB userbot commands",
-            validator=Boolean(default=False),
-        ),
-        ConfigValue(
-            "mcub_steps",
-            3,
-            description="Maximum MCUB commands per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "send_messages_enabled",
-            True,
-            description="Allow the agent to send messages as the userbot",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "send_message_steps",
-            3,
-            description="Maximum userbot messages sent per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "create_chats_enabled",
-            True,
-            description="Allow the agent to create channels/groups",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "create_chat_steps",
-            2,
-            description="Maximum channels/groups created per request",
-            validator=Integer(default=2, min=0, max=5),
-        ),
-        ConfigValue(
-            "create_bots_enabled",
-            True,
-            description="Allow the agent to create Telegram bots via BotFather",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "create_bot_steps",
-            1,
-            description="Maximum Telegram bots created per request",
-            validator=Integer(default=1, min=0, max=3),
-        ),
-        ConfigValue(
-            "account_tools_enabled",
-            True,
-            description="Allow the agent to edit profile/join chats/read/search messages",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "account_tool_steps",
-            5,
-            description="Maximum account-level tools per request",
-            validator=Integer(default=5, min=0, max=15),
-        ),
-        ConfigValue(
-            "chat_management_enabled",
-            True,
-            description="Allow the agent to manage chats: mute, ban, promote, title, slowmode",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "chat_management_steps",
-            5,
-            description="Maximum chat-management tools per request",
-            validator=Integer(default=5, min=0, max=15),
-        ),
-        ConfigValue(
-            "media_max_bytes",
-            8_000_000,
-            description="Maximum replied media bytes sent to AI",
-            validator=Integer(default=8_000_000, min=1024, max=25_000_000),
-        ),
-        ConfigValue(
-            "context_enabled",
-            True,
-            description="Remember chat context between .oa requests",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "context_turns",
-            10,
-            description="How many user/assistant turns to remember per chat",
-            validator=Integer(default=10, min=0, max=50),
-        ),
-        ConfigValue(
-            "context_compaction_enabled",
-            True,
-            description="Automatically summarize old chat context when it becomes too large",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "context_compaction_chars",
-            18000,
-            description="Compact remembered chat context after this many characters",
-            validator=Integer(default=18000, min=2000, max=200000),
-        ),
-        ConfigValue(
-            "context_compaction_keep_turns",
-            2,
-            description="Recent user/assistant turns to keep verbatim after compaction",
-            validator=Integer(default=2, min=0, max=10),
-        ),
-        ConfigValue(
-            "context_compaction_max_tokens",
-            900,
-            description="Maximum tokens used for the compaction summary response",
-            validator=Integer(default=900, min=128, max=4096),
-        ),
-        ConfigValue(
-            "tool_memory_enabled",
-            False,
-            description="Remember concise notes from tool outputs for next requests",
-            validator=Boolean(default=False),
-        ),
-        ConfigValue(
-            "tool_memory_items",
-            20,
-            description="Maximum remembered tool notes per chat",
-            validator=Integer(default=20, min=1, max=200),
-        ),
-        ConfigValue(
-            "tool_memory_max_chars",
-            500,
-            description="Maximum characters per remembered tool note",
-            validator=Integer(default=500, min=80, max=4000),
-        ),
-        ConfigValue(
-            "response_header",
-            "<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>",
-            description="Final response header template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
-            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>"),
-        ),
-        ConfigValue(
-            "request_label",
-            "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
-            description="Request block label template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
-            validator=String(default="<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>"),
-        ),
-        ConfigValue(
-            "response_label",
-            "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
-            description="Response block label template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
-            validator=String(default="<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>"),
-        ),
-        ConfigValue(
-            "thinking_template",
-            "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            description="Initial loading/thinking message template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
-            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>"),
-        ),
-        ConfigValue(
-            "tool_display_template",
-            "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
-            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General: {provider}, {model}, {reasoning_effort}, {elapsed}, {thinking}, {random}, {prefix}, {time}, {date}",
-            validator=String(
-                default="<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
-            ),
-        ),
-        ConfigValue(
-            "tool_status_emojis",
-            "thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠",
-            description="Custom emoji/icon map for {status_emoji}/{status_icon}. Format: group_or_tool=emoji per line. Tool-specific keys like terminal.run or thinking.note override groups like terminal/thinking. Premium emoji HTML is allowed via {status_emoji_html}/{status_icon_html}.",
-            validator=String(default="thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠"),
-        ),
-        ConfigValue(
-            "tool_display_max_chars",
-            1200,
-            description="Maximum chars from current tool input shown in status form",
-            validator=Integer(default=1200, min=80, max=4000),
-        ),
-        ConfigValue(
-            "tool_display_log_lines",
-            8,
-            description="How many recent tool names to show in status form",
-            validator=Integer(default=8, min=0, max=30),
-        ),
-        ConfigValue(
-            "thinking_display_limit",
-            3,
-            description="How many recent thinking.note entries to show in {thinking}",
-            validator=Integer(default=3, min=0, max=20),
-        ),
-        ConfigValue(
-            "thinking_empty_text",
-            "Модель ещё не думала.",
-            description="Text for {thinking} when no thinking.note entries exist",
-            validator=String(default="Модель ещё не думала."),
-        ),
-        ConfigValue(
-            "thinking_bullet",
-            "•",
-            description="Prefix marker for each thinking.note line in {thinking}. Empty disables the marker",
-            validator=String(default="•"),
-        ),
-        ConfigValue(
-            "random_strings",
-            ["Thinking...", "Думаю...", "Генерирую..."],
-            description="Random lines for {random}",
-            validator=List(default=["Thinking...", "Думаю...", "Генерирую..."], item_type=str),
-        ),
-        ConfigValue(
-            "todo_status_emojis",
-            "pending=...\nopen=>>>\nclosed=---",
-            description="State markers for {todo}. Format: pending=..., open=>>>, closed=---",
-            validator=String(default="pending=...\nopen=>>>\nclosed=---"),
-        ),
-        ConfigValue(
-            "placeholders",
-            "",
-            description="Available OpenAgent placeholders (auto-generated)",
-            validator=String(default=""),
-        ),
-        ConfigValue(
-            "repo_context_enabled",
-            True,
-            description="Inject local workspace snapshot into system prompt",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "repo_context_max_chars",
-            7000,
-            description="Maximum chars used for repo context in system prompt",
-            validator=Integer(default=7000, min=500, max=30000),
-        ),
-        ConfigValue(
-            "skills_enabled",
-            True,
-            description="Enable loading OpenAgent skills into the system prompt",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "skills_trigger_mode",
-            "auto",
-            description="When to load skills: auto = only on keyword match, always = every request, off = never",
-            validator=String(default="auto"),
-        ),
-        ConfigValue(
-            "skill_repo_url",
-            "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills",
-            description="Base URL for installable OpenAgent skills repository",
-            validator=String(default="https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills"),
-        ),
-        ConfigValue(
-            "tool_confirmation_enabled",
-            True,
-            description="Ask for confirmation before tools that can change files, chats, account state, or run commands",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "tool_confirmation_mode",
-            "medium",
-            description="How often to ask before tools: low = only critical/destructive, medium = write/actions, high = almost every non-read tool",
-            validator=Choice(choices=["low", "medium", "high"], default="medium"),
-        ),
-        ConfigValue(
-            "tool_confirmation_template",
-            "<blockquote><a href=\"tg://emoji?id=6010201728773790293\">😈</a> Continue?\n<a href=\"tg://emoji?id=6012317326584583729\">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6010394680179562842\">😶</a> <b>What will be completed</b>\n<a href=\"tg://emoji?id=6010292550152230657\">☀️</a> <code>{value}</code></blockquote>",
-            description="Confirmation form template. Placeholders: {tool}, {value}, {elapsed}, {elapsed_line}",
-            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010201728773790293\">😈</a> Continue?\n<a href=\"tg://emoji?id=6012317326584583729\">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6010394680179562842\">😶</a> <b>What will be completed</b>\n<a href=\"tg://emoji?id=6010292550152230657\">☀️</a> <code>{value}</code></blockquote>"),
-        ),
-        ConfigValue(
-            "tool_confirmation_yes_text",
-            "Выполнить",
-            description="Confirm button text for dangerous tools",
-            validator=String(default="Выполнить"),
-        ),
-        ConfigValue(
-            "tool_confirmation_no_text",
-            "Не сейчас",
-            description="Cancel button text for dangerous tools",
-            validator=String(default="Не сейчас"),
-        ),
-        ConfigValue(
-            "tool_confirmation_timeout",
-            900,
-            description="Seconds to wait for dangerous tool confirmation",
-            validator=Integer(default=900, min=10, max=3600),
-        ),
-    )
+
+class _OpenAgentLifecycleMixin:
+    """Lifecycle/bootstrap logic."""
 
     async def on_load(self) -> None:
         await super().on_load()
@@ -677,10 +349,23 @@ class OpenAgent(ModuleBase):
             await self.kernel.save_module_config(self.name, clean)
         self._last_request_at = 0.0
         self._skills_dir = self._resolve_skills_dir()
-        self._chat_history: dict[int, list[dict[str, str]]] = {}
+        sessions_path = Path(self._workspace_dir()) / "openagent_sessions" / "sessions.json"
+        self.session_manager = SessionManager(
+            sessions_path,
+            logger=self.log,
+            model_getter=self._model,
+            default_name_getter=lambda: self.strings("new_session_name"),
+            session_limit=self.SESSION_LIMIT,
+        )
+        self._sessions = self.session_manager.sessions
+        self._active_session = self.session_manager.active_session
+        self._session_prefs = self.session_manager.session_prefs
         self._tool_memory: dict[int, list[str]] = {}
         self._cancelled_generations: set[str] = set()
         self._regen_payloads: dict[str, dict[str, Any]] = {}
+        self._input_events: dict[str, dict[str, Any]] = {}
+        self._session_input_events: dict[str, dict[str, Any]] = {}
+        self._pending_prompts: dict[str, dict[str, Any]] = {}
         self._inline_status_waiters: dict[str, asyncio.Future[Any]] = {}
         self._tool_confirmation_waiters: dict[str, asyncio.Future[bool]] = {}
         self._last_token_usage = {
@@ -693,9 +378,15 @@ class OpenAgent(ModuleBase):
         self._plugin_files: dict[str, Path] = {}
         self._plugins_cache: list[dict] = []
         self._tool_map_cache: dict[str, str] | None = None
+        self._disabled_plugins: set[str] = self._load_disabled_plugins()
+        await self._load_sessions()
         await self._load_todo_items_storage()
         await self._load_installed_plugins()
         self.log.info("OpenAgent loaded")
+
+
+class _OpenAgentProviderMixin:
+    """Provider selection and text/template helpers."""
 
     def _provider(self) -> str:
         provider = str(self.config.get("provider", "openai")).lower().strip()
@@ -745,10 +436,13 @@ class OpenAgent(ModuleBase):
         else:
             notes = []
         if not notes:
-            return str(self.config.get("thinking_empty_text", "Модель ещё не думала.") or "Модель ещё не думала.")
+            return str(self.config.get("thinking_empty_text", "") or self.strings("thinking_empty_text"))
         bullet = str(self.config.get("thinking_bullet", "•") or "").strip()
         prefix = f"{bullet} " if bullet else ""
         return "\n".join(f"{prefix}{note}" for note in notes)
+
+    def _emoji(self, key: str, fallback: str = "") -> str:
+        return self.PREMIUM_EMOJIS.get(key, fallback)
 
     def _placeholder_values(
         self,
@@ -762,7 +456,7 @@ class OpenAgent(ModuleBase):
             raw_random = raw_random.splitlines()
         random_lines = [str(line).strip() for line in raw_random if str(line).strip()]
         random_value = random.choice(random_lines) if random_lines else "Thinking..."
-        return {
+        values = {
             "provider": self._provider_label(),
             "provider_key": self._provider(),
             "model": self._model(),
@@ -780,6 +474,9 @@ class OpenAgent(ModuleBase):
             "time": time.strftime("%H:%M:%S"),
             "date": time.strftime("%Y-%m-%d"),
         }
+        for key, value in self.PREMIUM_EMOJIS.items():
+            values[f"emoji_{key}"] = value
+        return values
 
     def _render_template(
         self,
@@ -801,70 +498,19 @@ class OpenAgent(ModuleBase):
 
     def _thinking_text(self) -> str:
         return self._render_template(
-            str(self.config.get("thinking_template", "") or "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>")
+            str(self.config.get("thinking_template", "") or self.strings("thinking_template_default"))
         )
 
     def _format_placeholders(self) -> str:
         return "\n".join(
             [
-                "Template placeholders available in response_header, request_label, response_label, thinking_template, and tool_display_template:",
-                "",
-                "General",
-                "{provider} - Provider label",
-                "{provider_key} - Provider config key",
-                "{model} - Current model",
-                "{reasoning_effort} - Current reasoning effort mode: off, low, medium, high, or xhigh",
-                "{tool_count} - How many tools the agent used in this request",
-                "{available_tool_count} - Registered OpenAgent tool operation count",
-                "{elapsed} - Generation time seconds",
-                "{input_tokens} - Input/prompt tokens accepted by provider",
-                "{output_tokens} - Output/completion tokens returned by provider",
-                "{total_tokens} - Total tokens for last provider response",
-                "{thinking} - Recent thinking.note entries or thinking_empty_text",
-                "{todo} - Persistent TODO list rendered with state markers",
-                "{todo_html} - Same as {todo}, but intended for raw HTML insertion in tool_display_template",
-                "{random} - Random line from random_strings",
-                "{prefix} - Current command prefix",
-                "{time} - Current local time",
-                "{date} - Current local date",
-                "",
-                "Raw tool display",
-                "{tool} - Current tool name in tool_display_template",
-                "{title} - Current tool status title in tool_display_template",
-                "{value} - Current tool input in tool_display_template",
-                "{log} - Recent tool log in tool_display_template",
-                "{step} - Current tool step number in tool_display_template",
-                "",
-                "Semantic tool display",
-                "{round} - Alias for current tool step number",
-                "{round_total} - Maximum tool rounds per request",
-                "{progress_bar} - Text progress bar for current round",
-                "{progress_percent} - Current round progress percent",
-                "{status_emoji} - Emoji/icon for current tool category from tool_status_emojis",
-                "{status_icon} - Alias for status_emoji",
-                "{status_emoji_html} - Raw HTML emoji/icon for current tool category; use for premium <a> emoji",
-                "{status_icon_html} - Alias for status_emoji_html",
-                "{status_text} - Human-readable current tool action",
-                "{tool_group} - Current tool namespace/category",
-                "{tool_short} - Current tool name without namespace",
-                "{tool_input} - Escaped current tool input; empty for thinking.note",
-                "{tool_input_block} - Ready HTML block with tool input; empty for thinking.note/no input",
-                "{thinking_line} - Recent thinking notes as escaped text",
-                "{thinking_block} - Ready HTML block with recent thinking notes",
-                "{log_lines} - Recent tool log as escaped text",
-                "{log_block} - Ready HTML block with recent tool log",
-                "{log_count} - Number of tools in current request log",
-                "{elapsed_line} - Ready text with elapsed seconds",
-                "{token_line} - Ready text with token usage",
-                "{model_line} - Ready text with provider/model",
-                "{activity_line} - Ready text with random status and elapsed seconds",
-                "",
-                "Config tips",
-                "tool_status_emojis format: one mapping per line, e.g. terminal=🖥 or thinking.note=<a href=\"tg://emoji?id=...\">❔</a>",
-                "tool-specific emoji keys override group keys; default=... is used as fallback.",
-                "todo_status_emojis format: pending=..., open=>>>, closed=--- (aliases: active/todo and done/completed).",
+                ""
             ]
         )
+
+
+class _OpenAgentTodoMixin:
+    """TODO parsing, formatting and persistence helpers."""
 
     def _parse_todo_items_raw(self, raw: str | None) -> list[dict[str, str]]:
         raw_text = str(raw or "").strip()
@@ -999,6 +645,10 @@ class OpenAgent(ModuleBase):
                     return idx, ""
         return None, "todo item not found"
 
+
+class _OpenAgentToolDisplayMixin:
+    """Tool grouping, status text and display rendering."""
+
     def _tool_group(self, tool_name: str) -> str:
         tool_name = (tool_name or "").lower().strip()
         if "." in tool_name:
@@ -1056,26 +706,21 @@ class OpenAgent(ModuleBase):
         tool_name = (tool_name or "").lower().strip()
         group = self._tool_group(tool_name)
         if tool_name == "thinking.note":
-            return "Думаю"
-        if group == "terminal":
-            return "Выполняю команду"
-        if group == "web":
-            return "Работаю с web"
-        if group == "file":
-            return "Работаю с файлом"
-        if group == "mcub":
-            return "Выполняю MCUB-команду"
-        if group == "message":
-            return "Работаю с сообщениями"
-        if group == "chat":
-            return "Проверяю чат"
-        if group == "dialog":
-            return "Проверяю диалоги"
-        if group == "code":
-            return "Готовлю код"
-        if group == "todo":
-            return "Обновляю TODO"
-        return title or f"Выполняю {tool_name or 'tool'}"
+            return self.strings("status_thinking")
+        status_key = {
+            "terminal": "status_terminal",
+            "web": "status_web",
+            "file": "status_file",
+            "mcub": "status_mcub",
+            "message": "status_message",
+            "chat": "status_chat",
+            "dialog": "status_dialog",
+            "code": "status_code",
+            "todo": "status_todo",
+        }.get(group)
+        if status_key:
+            return self.strings(status_key)
+        return title or self.strings("status_default", tool=tool_name or "tool")
 
     def _progress_bar(self, step: int, total: int, width: int = 10) -> str:
         total = max(1, total)
@@ -1104,19 +749,19 @@ class OpenAgent(ModuleBase):
         log_lines = html.escape(log_text)
         tool_input = "" if (tool_name or "").lower().strip() == "thinking.note" else html.escape(safe_value)
         tool_input_block = (
-            f"<blockquote expandable><b>📦 Tool input</b>\n<code>{tool_input}</code></blockquote>"
+            f"<blockquote expandable><b>{self._emoji('bubble', '📦')} Tool input</b>\n<code>{tool_input}</code></blockquote>"
             if tool_input
             else ""
         )
         log_block = (
-            f"<blockquote expandable><b>😪 Log tools</b>\n<code>{log_lines}</code></blockquote>"
+            f"<blockquote expandable><b>{self._emoji('loading_lava', '😪')} Log tools</b>\n<code>{log_lines}</code></blockquote>"
             if log_lines
             else ""
         )
-        thinking_block = f"<blockquote expandable><b>❔ Thinking</b>\n{thinking_line}</blockquote>"
+        thinking_block = f"<blockquote expandable><b>{self._emoji('loading_dots', '❔')} Thinking</b>\n{thinking_line}</blockquote>"
         elapsed_text = f"{elapsed:.1f}s" if elapsed is not None else "0.0s"
         token_line = (
-            f"💸 in {self._last_token_usage.get('input_tokens', 0)}, "
+            f"{self._emoji('grid', '💸')} in {self._last_token_usage.get('input_tokens', 0)}, "
             f"out {self._last_token_usage.get('output_tokens', 0)} | "
             f"total {self._last_token_usage.get('total_tokens', 0)}"
         )
@@ -1206,6 +851,10 @@ class OpenAgent(ModuleBase):
             lines.append(f"{index}. {name}")
         return "\n".join(lines)
 
+
+class _OpenAgentContextMixin:
+    """Conversation context, compaction, tool memory and config helpers."""
+
     def _request_label(
         self,
         *,
@@ -1213,7 +862,7 @@ class OpenAgent(ModuleBase):
         thinking_notes: list[str] | None = None,
     ) -> str:
         return self._render_template(
-            str(self.config.get("request_label", "") or "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>"),
+            str(self.config.get("request_label", "") or self.strings("request_label_default")),
             elapsed=elapsed,
             thinking_notes=thinking_notes,
         )
@@ -1225,35 +874,54 @@ class OpenAgent(ModuleBase):
         thinking_notes: list[str] | None = None,
     ) -> str:
         return self._render_template(
-            str(self.config.get("response_label", "") or "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>"),
+            str(self.config.get("response_label", "") or self.strings("response_label_default")),
             elapsed=elapsed,
             thinking_notes=thinking_notes,
         )
 
-    def _remember_context(self, chat_id: int | None, prompt: str, answer: str) -> None:
+    def _history_message(self, role: str, content: Any, limit: int = 12000) -> dict[str, str]:
+        text = str(content or "")
+        if len(text) > limit:
+            text = text[:limit] + "\n...[truncated]"
+        return {"role": role, "content": text}
+
+    def _remember_context(
+        self,
+        chat_id: int | None,
+        prompt: str,
+        answer: str,
+        tool_trace: list[dict[str, str]] | None = None,
+    ) -> None:
         if not chat_id or not self.config["context_enabled"]:
             return
-        history = self._chat_history.setdefault(int(chat_id), [])
-        history.extend(
-            [
-                {"role": "user", "content": prompt[-8000:]},
-                {"role": "assistant", "content": answer[-8000:]},
-            ]
-        )
-        max_messages = int(self.config["context_turns"]) * 2
-        if max_messages <= 0:
+        session = self._get_active_session(int(chat_id))
+        history = session.messages
+        entries = [self._history_message("user", prompt, limit=8000)]
+        for item in tool_trace or []:
+            role = str(item.get("role") or "assistant")
+            if role not in {"system", "user", "assistant"}:
+                role = "assistant"
+            entries.append(self._history_message(role, item.get("content", "")))
+        entries.append(self._history_message("assistant", answer, limit=8000))
+        history.extend(entries)
+        context_turns = int(self.config["context_turns"])
+        if context_turns <= 0:
             history.clear()
         elif history and history[0].get("role") == "system" and str(history[0].get("content", "")).startswith("Compacted previous OpenAgent session context:"):
+            max_messages = max(context_turns * 4, len(entries))
             keep_tail = max(0, max_messages - 1)
             tail_source = history[1:]
-            self._chat_history[int(chat_id)] = [history[0], *tail_source[-keep_tail:]] if keep_tail else [history[0]]
+            session.messages = [history[0], *tail_source[-keep_tail:]] if keep_tail else [history[0]]
         else:
+            max_messages = max(context_turns * 4, len(entries))
             del history[:-max_messages]
+        self._touch_session(session)
+        self._schedule_auto_name_session(session)
 
     def _history_for_chat(self, chat_id: int | None) -> list[dict[str, str]]:
         if not chat_id or not self.config["context_enabled"]:
             return []
-        return list(self._chat_history.get(int(chat_id), []))
+        return list(self._get_active_session(int(chat_id)).messages)
 
     def _history_chars(self, history: list[dict[str, str]]) -> int:
         return sum(len(str(item.get("content", ""))) for item in history)
@@ -1287,7 +955,8 @@ class OpenAgent(ModuleBase):
         if not bool(self.config.get("context_compaction_enabled", True)):
             return False
 
-        history = self._chat_history.get(int(chat_id), [])
+        _compact_session = self._get_active_session(int(chat_id))
+        history = _compact_session.messages
         threshold = int(self.config.get("context_compaction_chars", 18000) or 18000)
         if not history or self._history_chars(history) <= threshold:
             return False
@@ -1339,13 +1008,14 @@ class OpenAgent(ModuleBase):
         if not summary:
             return False
 
-        self._chat_history[int(chat_id)] = [
+        _compact_session.messages = [
             {
                 "role": "system",
                 "content": "Compacted previous OpenAgent session context:\n" + summary[-12000:],
             },
             *recent_history,
         ]
+        self._touch_session(_compact_session)
         return True
 
     def _tool_memory_note(self, text: str) -> str:
@@ -1391,6 +1061,486 @@ class OpenAgent(ModuleBase):
         self.config[key] = value
         await self.save_config()
 
+
+class _OpenAgentSessionsMixin:
+    """Named OA sessions, choice panels and pending prompts."""
+
+    def _sessions_file(self) -> Path:
+        return self.session_manager.sessions_file
+
+    async def _load_sessions(self) -> None:
+        """Load persisted sessions from disk."""
+        await self.session_manager.load()
+
+    async def _save_sessions(self) -> None:
+        """Persist sessions to disk (fire-and-forget via create_task)."""
+        await self.session_manager.save()
+
+    def _new_session(self, chat_id: int, name: str | None = None) -> OASession:
+        """Create a fresh session and make it active for chat_id."""
+        return self.session_manager.new_session(chat_id, name)
+
+    def _get_active_session(self, chat_id: int) -> OASession:
+        """Return active session for chat_id, creating one if needed."""
+        return self.session_manager.get_active_session(chat_id)
+
+    def _get_chat_sessions(self, chat_id: int) -> list[OASession]:
+        """Return all sessions for a chat, sorted newest-first."""
+        return self.session_manager.get_chat_sessions(chat_id)
+
+    def _enforce_session_limit(self, chat_id: int) -> None:
+        """Keep at most SESSION_LIMIT sessions per chat, pruning oldest."""
+        self.session_manager.enforce_limit(chat_id)
+
+    def _touch_session(self, session: OASession) -> None:
+        self.session_manager.touch_session(session)
+
+    def _set_active_session(self, chat_id: int, session_id: str) -> OASession | None:
+        return self.session_manager.set_active_session(chat_id, session_id)
+
+    def _session_default_names(self) -> set[str]:
+        return {
+            "New chat",
+            "Новый чат",
+            "Новый чатик",
+            "new-chat",
+            self.strings("new_session_name"),
+        }
+
+    def _session_needs_auto_name(self, session: OASession) -> bool:
+        return bool(session.messages) and (session.name or "").strip() in self._session_default_names()
+
+    def _schedule_auto_name_session(self, session: OASession) -> None:
+        if not self._session_needs_auto_name(session):
+            return
+        asyncio.get_event_loop().call_soon(
+            lambda: asyncio.ensure_future(self._auto_name_session(session.id))
+        )
+
+    async def _auto_name_session(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        if session is None or not self._session_needs_auto_name(session):
+            return
+        api_key = self._api_key()
+        if not api_key:
+            return
+        first_prompt = ""
+        for item in session.messages:
+            if item.get("role") == "user":
+                first_prompt = str(item.get("content", "")).strip()
+                break
+        if not first_prompt:
+            return
+        provider = self._provider()
+        prompt = self.strings("auto_name_prompt", prompt=first_prompt[:200])
+        messages = [
+            {"role": "system", "content": "Return only a short title, no quotes, no punctuation at the end."},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            if provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other"):
+                title = await self._ask_openai_compatible(provider, messages, api_key, max_tokens_override=32)
+            elif provider == "google":
+                title = await self._ask_google(messages, api_key)
+            else:
+                return
+        except Exception as exc:
+            self.log.debug("OpenAgent: session auto-name failed: %s", exc)
+            return
+        title = re.sub(r"[\r\n]+", " ", str(title or "")).strip(" `\"'«»“”.,;:!-_")
+        title = re.sub(r"\s+", " ", title)[:64].strip()
+        if not title or not self._session_needs_auto_name(session):
+            return
+        session.name = title
+        session.model = self._model(provider)
+        self._touch_session(session)
+
+    def _session_age_label(self, timestamp: float) -> str:
+        try:
+            dt = datetime.fromtimestamp(timestamp)
+        except Exception:
+            return ""
+        today = datetime.now().date()
+        day = dt.date()
+        delta = (today - day).days
+        if delta <= 0:
+            return self.strings("chat_today")
+        if delta == 1:
+            return self.strings("chat_yesterday")
+        if delta < 7:
+            return self.strings("chat_days_ago", days=delta)
+        return dt.strftime("%d.%m.%Y")
+
+    def _cleanup_session_inputs(self) -> None:
+        if len(self._session_input_events) <= 50:
+            return
+        stale = sorted(
+            self._session_input_events,
+            key=lambda key: self._session_input_events[key].get("created_at", 0),
+        )[:-50]
+        for key in stale:
+            self._session_input_events.pop(key, None)
+
+    def _make_session_input_token(self, chat_id: int, kind: str, source_event: Any | None = None) -> str:
+        token = str(uuid.uuid4())
+        self._session_input_events[token] = {
+            "event": source_event,
+            "chat_id": chat_id,
+            "kind": kind,
+            "created_at": time.time(),
+        }
+        self._cleanup_session_inputs()
+        return token
+
+    async def _inline_target(self, event: Any, chat_id: int | None = None) -> Any | None:
+        """Resolve a concrete entity for inline forms.
+
+        Telethon's InlineResult.click requires a non-empty entity. Some callback
+        events do not expose ``chat_id`` directly, so fall back to the event's
+        input chat/chat object before giving up.
+        """
+        if chat_id not in (None, 0, ""):
+            return chat_id
+        for attr in ("input_chat", "chat", "entity"):
+            target = getattr(event, attr, None)
+            if target:
+                return target
+        for method_name in ("get_input_chat", "get_chat"):
+            method = getattr(event, method_name, None)
+            if callable(method):
+                with contextlib.suppress(Exception):
+                    target = await method()
+                    if target:
+                        return target
+        return None
+
+    def _render_sessions_panel(self, chat_id: int) -> str:
+        active_id = self._active_session.get(chat_id)
+        lines = [self.strings("chats_title"), html.escape(self.strings("oa_choose_chat")), ""]
+        for session in self._get_chat_sessions(chat_id):
+            marker = "●" if session.id == active_id else " "
+            name = html.escape(session.name or self.strings("new_session_name"))
+            age = html.escape(self._session_age_label(session.updated_at))
+            if session.messages:
+                lines.append(f"{marker} <b>{name}</b>     <i>{age}</i>")
+            else:
+                lines.append(f"{marker} <b>{name}</b>     <i>{html.escape(self.strings('chat_empty'))}</i>")
+        return "\n".join(lines)
+
+    def _sessions_panel_buttons(self, chat_id: int, source_event: Any | None = None) -> list[list[Any]]:
+        rows: list[list[Any]] = []
+        allow_user = getattr(source_event, "sender_id", None)
+        for session in self._get_chat_sessions(chat_id):
+            marker = "●" if self._active_session.get(chat_id) == session.id else " "
+            label = f"{marker} {session.name or self.strings('new_session_name')}"
+            rows.append([self.Button.inline(label[:64], self._switch_session, args=(session.id,), style="primary")])
+        rows.append([
+            self.Button.input(
+                self.strings("new_chat_button"),
+                self._on_new_session_input,
+                placeholder=self.strings("new_chat_placeholder"),
+                allow_user=allow_user,
+                style="primary",
+                data=self._make_session_input_token(chat_id, "new", source_event),
+            )
+        ])
+        rows.append([
+            self.Button.input(
+                self.strings("rename_chat_button"),
+                self._on_rename_session_input,
+                placeholder=self.strings("rename_chat_placeholder"),
+                allow_user=allow_user,
+                style="primary",
+                data=self._make_session_input_token(chat_id, "rename", source_event),
+            ),
+            self.Button.inline(self.strings("delete_chat_button"), self._delete_active_session, args=(chat_id,), style="danger"),
+        ])
+        rows.append([self.Button.inline(self.strings("remember_chat_button"), self._remember_session_choice, args=(chat_id,), style="primary")])
+        return rows
+
+    async def _show_sessions_panel(
+        self,
+        event: Any,
+        chat_id: int,
+        *,
+        alert: str | None = None,
+        force_inline: bool = False,
+    ) -> None:
+        self._get_active_session(chat_id)
+        text = self._render_sessions_panel(chat_id)
+        if alert and hasattr(event, "answer"):
+            with contextlib.suppress(Exception):
+                await event.answer(alert, alert=False)
+        if force_inline:
+            target = await self._inline_target(event, chat_id)
+            if not target:
+                await self.edit(event, text, as_html=True)
+                return
+            token = str(uuid.uuid4())
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[Any] = loop.create_future()
+            self._inline_status_waiters[token] = future
+            try:
+                _unit, sms = await self.inline(
+                    target,
+                    text,
+                    buttons=[[self.Button.inline(" ", self._activate_inline_status, args=(token,), style="primary")]],
+                    ttl=900,
+                    parse_mode="html",
+                )
+                if sms:
+                    with contextlib.suppress(Exception):
+                        await sms.click(0)
+                try:
+                    panel_event = await asyncio.wait_for(future, timeout=5)
+                except asyncio.TimeoutError:
+                    panel_event = sms or event
+                buttons = self._sessions_panel_buttons(chat_id, source_event=panel_event)
+                if hasattr(panel_event, "edit"):
+                    await panel_event.edit(text, buttons=buttons, parse_mode="html")
+                with contextlib.suppress(Exception):
+                    setattr(panel_event, "_openagent_source_chat_id", chat_id)
+                with contextlib.suppress(Exception):
+                    await event.delete()
+                return
+            except Exception as exc:
+                self.log.debug("OpenAgent: inline sessions panel fallback: %s", exc)
+            finally:
+                self._inline_status_waiters.pop(token, None)
+
+        buttons = self._sessions_panel_buttons(chat_id, source_event=event)
+        try:
+            if hasattr(event, "edit"):
+                await event.edit(text, buttons=buttons, parse_mode="html")
+                return
+        except Exception:
+            pass
+        try:
+            target = await self._inline_target(event, chat_id)
+            if not target:
+                raise ValueError("chat target is missing")
+            _unit, _sms = await self.inline(target, text, buttons=buttons, ttl=900, parse_mode="html")
+            if hasattr(event, "delete"):
+                with contextlib.suppress(Exception):
+                    await event.delete()
+        except Exception:
+            await self.edit(event, text, as_html=True)
+
+
+
+
+
+    async def _on_new_session_input(self, event: Any, text: str, data: str) -> None:
+        entry = self._session_input_events.pop(data, None)
+        if not entry:
+            return
+        chat_id = int(entry["chat_id"])
+        name = (text or "").strip() or None
+        session = self._new_session(chat_id, name=name)
+        panel_event = entry.get("event") or event
+        await self._show_sessions_panel(panel_event, chat_id, alert=self.strings("chat_created", name=session.name))
+
+    async def _on_rename_session_input(self, event: Any, text: str, data: str) -> None:
+        entry = self._session_input_events.pop(data, None)
+        if not entry:
+            return
+        chat_id = int(entry["chat_id"])
+        name = (text or "").strip()
+        if not name:
+            return
+        session = self._get_active_session(chat_id)
+        session.name = name[:64]
+        self._touch_session(session)
+        panel_event = entry.get("event") or event
+        await self._show_sessions_panel(panel_event, chat_id, alert=self.strings("chat_renamed", name=session.name))
+
+    def _store_pending_prompt(
+        self,
+        chat_id: int,
+        prompt: str,
+        full_prompt: str,
+        attachments: list[dict[str, str]],
+    ) -> str:
+        token = str(uuid.uuid4())
+        self._pending_prompts[token] = {
+            "chat_id": chat_id,
+            "prompt": prompt,
+            "full_prompt": full_prompt,
+            "attachments": attachments,
+            "created_at": time.time(),
+        }
+        if len(self._pending_prompts) > 30:
+            stale = sorted(
+                self._pending_prompts,
+                key=lambda k: self._pending_prompts[k]["created_at"],
+            )[:-30]
+            for k in stale:
+                self._pending_prompts.pop(k, None)
+        return token
+
+    def _oa_choice_text(self, chat_id: int) -> str:
+        active_id = self._active_session.get(chat_id)
+        lines = [self.strings("oa_chat_choice_title"), ""]
+        for session in self._get_chat_sessions(chat_id):
+            marker = "●" if session.id == active_id else " "
+            name = html.escape(session.name or self.strings("new_session_name"))
+            if session.messages:
+                age = html.escape(self._session_age_label(session.updated_at))
+                lines.append(f"{marker} <b>{name}</b>     <i>{age}</i>")
+            else:
+                lines.append(f"{marker} <b>{name}</b>     <i>{html.escape(self.strings('chat_empty'))}</i>")
+        return "\n".join(lines)
+
+    def _oa_choice_buttons(
+        self,
+        chat_id: int,
+        prompt_token: str,
+        source_event: Any | None = None,
+    ) -> list[list[Any]]:
+        allow_user = getattr(source_event, "sender_id", None)
+        rows: list[list[Any]] = []
+        active_id = self._active_session.get(chat_id)
+        for session in self._get_chat_sessions(chat_id):
+            marker = "●" if session.id == active_id else " "
+            label = f"{marker} {session.name or self.strings('new_session_name')}"
+            if session.id == active_id:
+                btn = self.Button.inline(
+                    label[:64],
+                    self._run_pending_here,
+                    args=(prompt_token,),
+                    style="primary",
+                )
+            else:
+                btn = self.Button.inline(
+                    label[:64],
+                    self._run_pending_in,
+                    args=(prompt_token, session.id),
+                    style="primary",
+                )
+            rows.append([btn])
+        rows.append([
+            self.Button.input(
+                self.strings("new_chat_button"),
+                self._on_new_session_for_pending,
+                placeholder=self.strings("new_chat_placeholder"),
+                allow_user=allow_user,
+                style="primary",
+                data=f"{prompt_token}:{chat_id}",
+            ),
+        ])
+        rows.append([
+            self.Button.inline(
+                self.strings("remember_pref_continue"),
+                self._remember_pref_continue,
+                args=(prompt_token, chat_id),
+                style="primary",
+            ),
+            self.Button.inline(
+                self.strings("remember_pref_new"),
+                self._remember_pref_new,
+                args=(prompt_token, chat_id),
+                style="primary",
+            ),
+        ])
+        return rows
+
+    async def _show_oa_choice_panel(
+        self,
+        event: Any,
+        chat_id: int,
+        prompt_token: str,
+    ) -> None:
+        text = self._oa_choice_text(chat_id)
+        buttons = self._oa_choice_buttons(chat_id, prompt_token, source_event=event)
+        try:
+            target = await self._inline_target(event, chat_id)
+            if not target:
+                raise ValueError("chat target is missing")
+            _unit, _sms = await self.inline(target, text, buttons=buttons, ttl=900, parse_mode="html")
+            with contextlib.suppress(Exception):
+                await event.delete()
+        except Exception:
+            await self.edit(event, text, as_html=True)
+
+    async def _execute_pending(self, event: Any, prompt_token: str) -> None:
+        """Run a stored pending prompt using event for status display."""
+        entry = self._pending_prompts.pop(prompt_token, None)
+        if not entry:
+            return
+        prompt = entry["prompt"]
+        full_prompt = entry["full_prompt"]
+        attachments = entry.get("attachments") or []
+        chat_id = entry.get("chat_id") or getattr(event, "chat_id", None)
+        cancel_token = str(uuid.uuid4())
+        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
+        loading = await self._start_inline_status(
+            event,
+            self._thinking_text(),
+            [[cancel_button]],
+        )
+        started = time.monotonic()
+        try:
+            answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
+                full_prompt,
+                status_event=loading or event,
+                source_event=event,
+                attachments=attachments,
+                cancel_token=cancel_token,
+                started_at=started,
+            )
+            self._last_request_at = time.time()
+            elapsed = time.monotonic() - started
+            self._remember_context(chat_id, full_prompt, answer, tool_trace)
+            await self._reply_text(
+                loading or event,
+                answer,
+                title=self._response_title(
+                    elapsed,
+                    tool_count=len(agent_log),
+                    thinking_notes=thinking_notes,
+                ),
+                prompt=prompt,
+                agent_log=agent_log,
+                thinking_notes=thinking_notes,
+                buttons=self._final_buttons(
+                    chat_id,
+                    prompt,
+                    full_prompt,
+                    attachments,
+                    source_event=loading or event,
+                ),
+                edit_current=True,
+            )
+            self._cancelled_generations.discard(cancel_token)
+        except Exception as exc:
+            self._cancelled_generations.discard(cancel_token)
+            await self.kernel.handle_error(exc, source="OpenAgent:pending", event=event)
+            with contextlib.suppress(Exception):
+                await self.edit(
+                    loading or event,
+                    html.escape(self.strings("error", error=str(exc))),
+                    as_html=True,
+                )
+
+
+
+    async def _on_new_session_for_pending(self, event: Any, text: str, data: str) -> None:
+        """Button.input: create a new session then run the pending prompt."""
+        parts = str(data).split(":", 1)
+        if len(parts) != 2:
+            return
+        prompt_token, chat_id_str = parts
+        chat_id = int(chat_id_str)
+        name = (text or "").strip() or None
+        self._new_session(chat_id, name=name)
+        await self._execute_pending(event, prompt_token)
+
+
+
+
+class _OpenAgentPluginSkillMixin:
+    """OpenAgent plugin and skill discovery/install helpers."""
+
     def _resolve_skills_dir(self) -> Path:
         path = Path(self._workspace_dir()) / "openagent_skills"
         path.mkdir(parents=True, exist_ok=True)
@@ -1413,9 +1563,42 @@ class OpenAgent(ModuleBase):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def _disabled_plugins_file(self) -> Path:
+        return self._resolve_plugins_dir() / "disabled_plugins.json"
+
+    def _load_disabled_plugins(self) -> set[str]:
+        fpath = self._disabled_plugins_file()
+        if not fpath.exists():
+            return set()
+        try:
+            data = json.loads(fpath.read_text(encoding="utf-8"))
+            raw = data.get("disabled", data) if isinstance(data, dict) else data
+            if not isinstance(raw, list):
+                return set()
+            return {self._safe_plugin_name(item) for item in raw if str(item or "").strip()}
+        except Exception as exc:
+            self.log.warning(f"OpenAgent: failed to load disabled plugins: {exc}")
+            return set()
+
+    def _save_disabled_plugins(self) -> None:
+        try:
+            data = {"disabled": sorted(getattr(self, "_disabled_plugins", set()))}
+            self._disabled_plugins_file().write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as exc:
+            self.log.warning(f"OpenAgent: failed to save disabled plugins: {exc}")
+
     def _builtin_plugins_dir(self) -> Path:
         """Directory with bundled plugins shipped with OpenAgent."""
         return Path(__file__).resolve().parent / "OpenAgent" / "plugins"
+
+    def _is_builtin_plugin_file(self, fpath: Path) -> bool:
+        try:
+            fpath.resolve().relative_to(self._builtin_plugins_dir().resolve())
+            return True
+        except Exception:
+            return False
 
     def _plugin_scan_dirs(self) -> list[Path]:
         dirs: list[Path] = []
@@ -1431,6 +1614,9 @@ class OpenAgent(ModuleBase):
             for fpath in sorted(plugins_dir.glob("*.py")):
                 if fpath.name.startswith("_") or fpath.name == "__init__.py":
                     continue
+                if self._is_builtin_plugin_file(fpath) and self._safe_plugin_name(fpath.stem) in self._disabled_plugins:
+                    self.log.debug(f"Plugin skipped (disabled): {fpath.stem}")
+                    continue
                 try:
                     await self._register_plugin_from_file(fpath)
                 except Exception as exc:
@@ -1443,7 +1629,12 @@ class OpenAgent(ModuleBase):
         if not spec or not spec.loader:
             raise ImportError(f"Cannot load {fpath}")
         mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        sys.modules[module_name] = mod
+        try:
+            spec.loader.exec_module(mod)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
         plugin_cls = None
         for attr_name in dir(mod):
             attr = getattr(mod, attr_name)
@@ -1455,6 +1646,11 @@ class OpenAgent(ModuleBase):
         plugin = plugin_cls(self)
         self._register_plugin(plugin)
         self._plugin_files[str(plugin.name).lower()] = fpath
+        if not self._is_builtin_plugin_file(fpath):
+            plugin_name = self._safe_plugin_name(plugin.name)
+            if plugin_name in self._disabled_plugins:
+                self._disabled_plugins.discard(plugin_name)
+                self._save_disabled_plugins()
         on_load = getattr(plugin, "on_load", None)
         if callable(on_load):
             maybe_awaitable = on_load()
@@ -1493,6 +1689,7 @@ class OpenAgent(ModuleBase):
 
     def _effective_tool_registry(self) -> tuple[str, ...]:
         names = set(self.TOOL_REGISTRY)
+        names.update(self._get_tool_map().keys())
         for plugin in self._plugins.values():
             for tool_name in getattr(plugin, "tool_registry", ()):
                 if tool_name:
@@ -1513,8 +1710,21 @@ class OpenAgent(ModuleBase):
     def _get_plugin_for_tool(self, tool_name: str) -> OpenAgentPlugin | None:
         """Find which plugin handles a given tool name."""
         tool_name = (tool_name or "").lower().strip()
-        for candidate in self._plugins.values():
-            if tool_name in getattr(candidate, "tool_map", {}):
+        plugins = tuple(self._plugins.values())
+        for candidate in reversed(plugins):
+            tool_map = {
+                str(key).lower().strip(): value
+                for key, value in getattr(candidate, "tool_map", {}).items()
+            }
+            if tool_name in tool_map:
+                return candidate
+        for candidate in reversed(plugins):
+            registry = {
+                str(item).lower().strip()
+                for item in getattr(candidate, "tool_registry", ())
+                if item
+            }
+            if tool_name in registry:
                 return candidate
         group = self._tool_group(tool_name)
         plugin = self._plugins.get(group)
@@ -1522,19 +1732,80 @@ class OpenAgent(ModuleBase):
             return plugin
         return None
 
+    def _core_tool_docs(self) -> dict[str, dict[str, str]]:
+        return {
+            "thinking.note": {"desc": "Record a concise progress/thinking note for the user.", "args": "note/text", "body": "optional note text"},
+            "skill": {"desc": "Save an OpenAgent skill from body text.", "args": "name/title", "body": "skill markdown/content"},
+            "skill.save": {"desc": "Save an OpenAgent skill from body text.", "args": "name/title", "body": "skill markdown/content"},
+            "skills.list": {"desc": "List installed OpenAgent skills."},
+            "skills.read": {"desc": "Read an installed OpenAgent skill.", "args": "name", "body": "optional skill name"},
+            "skills.activate": {"desc": "Activate/load the best matching installed skill for the current task.", "args": "query/name", "body": "optional query"},
+            "skills.import_md": {"desc": "Import a skill from markdown body.", "args": "name/title", "body": "markdown content"},
+            "skills.export_md": {"desc": "Export/read an installed skill as markdown.", "args": "name", "body": "optional skill name"},
+            "skills.save_from_ai": {"desc": "Persist useful knowledge as an OpenAgent skill.", "args": "name/title", "body": "skill content"},
+            "skills.install": {"desc": "Install a skill from the configured skill repository.", "args": "name", "body": "optional skill name"},
+            "skills.repo_list": {"desc": "List skills available in the configured skill repository."},
+            "code.generate_file": {"desc": "Generate a text/code file and keep it for sending/attaching.", "args": "name/path", "body": "file content"},
+            "code.generate_mcub_module": {"desc": "Generate an MCUB module file.", "args": "name", "body": "module code"},
+            "code.choose_filename": {"desc": "Choose/sanitize a filename for generated code.", "args": "name/path", "body": "optional filename"},
+            "code.attach_result": {"desc": "Attach/send the latest generated code/file result."},
+            "code.read_docs": {"desc": "Read bundled/remote MCUB API documentation."},
+            "context.remember": {"desc": "Remember a note in the active chat context.", "body": "memory note"},
+            "context.clear": {"desc": "Clear the active OpenAgent session context."},
+            "context.regenerate": {"desc": "Explain that regeneration is available via the response button."},
+            "context.reply_context": {"desc": "Read context from the replied message."},
+            "context.media_context": {"desc": "Read replied media/message context."},
+            "todo.add": {"desc": "Add a TODO item.", "args": "text/task"},
+            "todo.delete": {"desc": "Delete a TODO item.", "args": "id/index/text"},
+            "todo.edit": {"desc": "Edit a TODO item.", "args": "id/index/text/status"},
+            "todo.current": {"desc": "Show the current TODO list."},
+            "todo.close": {"desc": "Mark a TODO item as closed.", "args": "id/index/text"},
+            "todo.closeall": {"desc": "Close all TODO items."},
+            "todo.clear": {"desc": "Clear the TODO list."},
+            "utility.token_usage": {"desc": "Show token usage from the last provider response."},
+            "utility.placeholders": {"desc": "Show available OpenAgent template placeholders."},
+            "utility.random_template": {"desc": "Render the current thinking/random template."},
+            "utility.agent_log": {"desc": "Explain where the agent log is shown."},
+            "utility.error_file": {"desc": "Explain how OpenAgent reports errors."},
+            "utility.tool_help": {"desc": "Show documentation for one tool.", "args": "tool", "body": "optional tool name"},
+            "utility.list_tools": {"desc": "List all available core and plugin tools by category."},
+        }
+
+    def _get_tool_docs(self, tool_name: str | None = None) -> dict:
+        docs: dict[str, dict[str, str]] = {}
+        core_docs = self._core_tool_docs()
+        for tname, handler in self._get_tool_map().items():
+            clean = str(tname).lower().strip()
+            docs[clean] = dict(
+                core_docs.get(
+                    clean,
+                    {"desc": f"Tool handled by {handler}", "args": "see plugin/core handler docs"},
+                )
+            )
+        for plugin in self._plugins.values():
+            plugin_docs = getattr(plugin, "tool_docs", None)
+            if isinstance(plugin_docs, dict):
+                for tname, tdoc in plugin_docs.items():
+                    doc_entry = dict(tdoc)
+                    if tname in getattr(plugin, "dangerous_tools", set()):
+                        doc_entry.setdefault("dangerous", "true")
+                    docs[str(tname).lower().strip()] = doc_entry
+        if tool_name:
+            clean = tool_name.lower().strip()
+            return {clean: docs.get(clean, {"desc": f"No documentation for {clean}", "args": "unknown"})}
+        return docs
+
     async def _fetch_repo_plugins(self) -> list[dict]:
         """Fetch list of available plugins from GitHub repo."""
         url = "https://api.github.com/repos/hairpin01/repo-MCUB-fork/contents/OpenAgent/plugins"
         try:
-            session = aiohttp.ClientSession()
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    return []
-                files = await resp.json()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status != 200:
+                        return []
+                    files = await resp.json()
         except Exception:
             return []
-        finally:
-            await session.close()
 
         plugins = []
         for f in files:
@@ -1554,15 +1825,13 @@ class OpenAgent(ModuleBase):
         """Parse plugin metadata from raw .py file via regex."""
         meta: dict = {"name": "?", "version": "?", "author": "?", "description": "?", "tools": []}
         try:
-            session = aiohttp.ClientSession()
-            async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    return meta
-                code = await resp.text()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        return meta
+                    code = await resp.text()
         except Exception:
             return meta
-        finally:
-            await session.close()
 
         name_m = re.search(r'name\s*=\s*["](.+?)["]', code) or re.search(r"name\s*=\s*['](.+?)[']", code)
         ver_m = re.search(r'version\s*=\s*["](.+?)["]', code) or re.search(r"version\s*=\s*['](.+?)[']", code)
@@ -1581,21 +1850,24 @@ class OpenAgent(ModuleBase):
 
     async def _install_plugin_from_repo(self, name: str) -> str:
         """Download a plugin from repo and install it."""
-        raw_url = f"https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/plugins/{name}.py"
-        session = aiohttp.ClientSession()
-        try:
+        safe_name = self._safe_plugin_name(name)
+        raw_url = f"https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/plugins/{safe_name}.py"
+        async with aiohttp.ClientSession() as session:
             async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
-                    raise ValueError(f"Plugin {name} not found in repo")
+                    raise ValueError(f"Plugin {safe_name} not found in repo")
                 code = await resp.text()
-        finally:
-            await session.close()
-        
+
         plugins_dir = self._resolve_plugins_dir()
-        fpath = plugins_dir / f"{name}_plugin.py"
+        fpath = plugins_dir / f"{safe_name}.py"
         fpath.write_text(code, encoding="utf-8")
-        await self._register_plugin_from_file(fpath)
-        return name
+        try:
+            await self._register_plugin_from_file(fpath)
+        except Exception:
+            with contextlib.suppress(Exception):
+                fpath.unlink()
+            raise
+        return next((pname for pname, path in self._plugin_files.items() if path == fpath), safe_name)
 
     def _safe_plugin_name(self, name: str) -> str:
         name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(name or "").strip()).strip("._")
@@ -1990,11 +2262,11 @@ class OpenAgent(ModuleBase):
     async def _install_repo_skill(self, name: str) -> str:
         query = (name or "").strip()
         if not query:
-            raise RuntimeError("skill name is required")
+            raise RuntimeError(self.strings("skill_name_required"))
         base_url = self._skill_repo_base_url()
         candidates = await self._repo_skill_candidates(query)
         if not candidates:
-            raise RuntimeError(f"Skill not found in repo: {query}")
+            raise RuntimeError(self.strings("skill_not_found_repo", query=query))
         item = candidates[0]
         path = str(item.get("path") or f"{self._safe_skill_name(str(item.get('name') or query))}/SKILL.md").lstrip("/")
         content = await self._fetch_text_url(f"{base_url}/{quote(path)}", max_chars=200000)
@@ -2012,6 +2284,9 @@ class OpenAgent(ModuleBase):
             lines.append(f"- {name}: {description}" if description else f"- {name}")
         return "\n".join(lines)
 
+
+class _OpenAgentRuntimeToolsMixin:
+    """System prompt construction and local runtime tools."""
 
     def _thinking_system_prompt(self) -> str:
         base = str(self.config["system_prompt"]).strip()
@@ -2032,7 +2307,7 @@ class OpenAgent(ModuleBase):
         tlist = ", ".join(sorted(self._get_tool_map().keys()))
         todo_snapshot = self._format_todo_placeholder()
         prompt += (
-            f"\n\nOpenAgent 0.6.5 is active. You have access to {len(self._effective_tool_registry())} tool operations.\n"
+            f"\n\n{self.name} {self.version} is active. Author: {self.author}. You have access to {len(self._effective_tool_registry())} tool operations.\n"
             "\n## Tool call format\n"
             "Output one or more fenced JSON blocks. Each block is ONE tool call:\n"
             "```tool_call\n"
@@ -2052,15 +2327,17 @@ class OpenAgent(ModuleBase):
             "\n## Format rules\n"
             "- ONLY ```tool_call``` fenced JSON blocks. No XML tags. No plain JSON outside fences.\n"
             "- When no tool is needed: reply in plain text with no ```tool_call``` blocks at all.\n"
-            f"Available tool names: {tlist}\n"
-            "\n## Guidelines\n"
-            "1. Use only tools from 'Available tool names'. Wrong names fail immediately.\n"
-            "2. mcub.* tools: omit the userbot prefix (body='ping', not '.ping').\n"
-            "3. Unknown domain? Call skills.activate first. To persist knowledge: skills.save_from_ai.\n"
-            "4. Simple greetings/questions: answer in plain text, no tools.\n"
-            "5. thinking.note: use for meaningful progress updates only — findings, risky actions, approach changes.\n"
-            "6. Multi-step tasks: keep todo.* in sync (todo.add → todo.current → todo.close → todo.clear).\n"
-            "Never explain tool calls. Output the block(s) and wait for results."
+             f"Available tool names: {tlist}\n"
+             "\n## Guidelines\n"
+             "1. Use only tools from 'Available tool names'. Wrong names fail immediately.\n"
+             "2. mcub.* tools: omit the userbot prefix (body='ping', not '.ping').\n"
+             "3. Unknown domain? Call skills.activate first. To persist knowledge: skills.save_from_ai.\n"
+             "4. Simple greetings/questions: answer in plain text, no tools.\n"
+             "5. thinking.note: use for meaningful progress updates only — findings, risky actions, approach changes.\n"
+             "6. Multi-step tasks: keep todo.* in sync (todo.add → todo.current → todo.close → todo.clear).\n"
+             "7. Don't know how to use a tool? Call utility.tool_help tool=<name> to see its arguments and description.\n"
+             "   Or utility.list_tools to browse all tools by category.\n"
+             "Never explain tool calls. Output the block(s) and wait for results."
         )
         prompt += "\n\nCurrent TODO state:\n" + todo_snapshot
         prompt += self._load_skills_prompt(user_prompt)
@@ -2092,6 +2369,9 @@ class OpenAgent(ModuleBase):
             result += f"stderr:\n{err}\n"
         return result[-6000:]
 
+
+class _OpenAgentTelegramMediaMixin:
+    """Telegram entities, files, media and reply-context helpers."""
 
     async def _fetch_mcub_docs(self) -> str:
         timeout = aiohttp.ClientTimeout(total=int(self.config["timeout"]))
@@ -2421,66 +2701,6 @@ class OpenAgent(ModuleBase):
             content.append({"type": "media", **item})
         return content
 
-    class _MCUBEvent:
-        def __init__(self, outer: "OpenAgent", source_event: Any, text: str) -> None:
-            self._outer = outer
-            self._source_event = source_event
-            self.text = text
-            self.raw_text = text
-            self.message = self
-            self.client = outer.client
-            self.chat_id = getattr(source_event, "chat_id", None)
-            self.sender_id = getattr(outer.kernel, "ADMIN_ID", None) or getattr(
-                source_event, "sender_id", None
-            )
-            self.id = getattr(source_event, "id", 0)
-            self.out = True
-            self.piped = False
-            self.pipe_input = None
-            self.pipe_output = None
-            self.pipe_exit_code = 0
-            self.no_add_args_to_input = False
-            self._outputs: list[str] = []
-
-        async def edit(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
-            await asyncio.sleep(0)
-            self._outputs.append(str(text))
-            return self
-
-        async def reply(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
-            await asyncio.sleep(0)
-            self._outputs.append(str(text))
-            return self
-
-        async def respond(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
-            await asyncio.sleep(0)
-            self._outputs.append(str(text))
-            return self
-
-        async def delete(self, *args: Any, **kwargs: Any) -> None:
-            await asyncio.sleep(0)
-            return None
-
-        async def get_reply_message(self) -> Any:
-            if hasattr(self._source_event, "get_reply_message"):
-                return await self._source_event.get_reply_message()
-            return None
-
-        async def get_chat(self) -> Any:
-            if hasattr(self._source_event, "get_chat"):
-                return await self._source_event.get_chat()
-            return None
-
-        async def get_sender(self) -> Any:
-            if hasattr(self._source_event, "get_sender"):
-                return await self._source_event.get_sender()
-            return None
-
-        @property
-        def output(self) -> str:
-            return "\n\n".join(self._outputs).strip()
-
-
     def _parse_xml_attrs(self, attrs: str) -> dict[str, str]:
         parsed: dict[str, str] = {}
         for key, value in re.findall(r"([a-zA-Z_][\w.-]*)=[\"']([^\"']*)[\"']", attrs or ""):
@@ -2528,7 +2748,6 @@ class OpenAgent(ModuleBase):
         await self.client(EditPhotoRequest(channel=channel, photo=uploaded))
         return "avatar set"
 
-
     async def _resolve_tool_chat(self, chat: str | None, source_event: Any | None) -> Any:
         await asyncio.sleep(0)
         chat = (chat or "").strip()
@@ -2556,7 +2775,6 @@ class OpenAgent(ModuleBase):
                     return sender
         raise ValueError("user is required or reply to a user's message")
 
-
     def _format_sender_short(self, sender: Any) -> str:
         if sender is None:
             return "Unknown"
@@ -2567,7 +2785,6 @@ class OpenAgent(ModuleBase):
             if p
         ) or getattr(sender, "title", None) or "Unknown"
         return f"{name} {username}".strip()
-
 
     async def _message_id_from_attrs(
         self, attrs: dict[str, str], body: str, source_event: Any | None
@@ -2584,6 +2801,9 @@ class OpenAgent(ModuleBase):
                 return getattr(reply, "id", None)
         return None
 
+
+class _OpenAgentStatusMixin:
+    """Inline status UI, confirmations and dangerous-tool gating."""
 
     async def _show_agent_action(
         self,
@@ -2606,10 +2826,21 @@ class OpenAgent(ModuleBase):
         try:
             buttons = getattr(event, "_openagent_status_buttons", None)
             if buttons is not None and hasattr(event, "edit"):
+                self.log.debug(
+                    "OA show_action EDIT_FORM: tool=%s has_buttons=%s title_len=%d",
+                    tool_name, bool(buttons), len(text),
+                )
                 await event.edit(text, buttons=buttons, parse_mode="html")
             else:
+                self.log.debug(
+                    "OA show_action FALLBACK_EDIT: tool=%s has_edit=%s has_buttons=%s",
+                    tool_name, hasattr(event, "edit"), buttons is not None,
+                )
                 await self.edit(event, text, as_html=True)
-        except Exception:
+        except Exception as exc:
+            self.log.debug(
+                "OA show_action EXCEPTION: tool=%s error=%s", tool_name, exc,
+            )
             await self.edit(event, html.escape(title), as_html=True)
 
     def _dangerous_terminal_command(self, command: str) -> bool:
@@ -2633,6 +2864,17 @@ class OpenAgent(ModuleBase):
             return False
         name = (tool_name or "").lower().strip()
         group = self._tool_group(name)
+
+        plugin = self._get_plugin_for_tool(name)
+        if plugin is not None:
+            plugin_dangerous = getattr(plugin, "dangerous_tools", None)
+            if isinstance(plugin_dangerous, set):
+                if name in plugin_dangerous:
+                    return True
+            elif isinstance(plugin_dangerous, dict):
+                tool_level = plugin_dangerous.get(name)
+                if tool_level is not None:
+                    return tool_level != "safe"
         safe_read_tools = {
             "message.get", "message.search", "message.history", "message.typing",
             "dialog.list_private", "dialog.list_groups", "dialog.list_all", "dialog.search",
@@ -2682,19 +2924,6 @@ class OpenAgent(ModuleBase):
             return group not in {"utility", "thinking"}
         return name in critical_tools or group in medium_groups
 
-    @callback(ttl=900)
-    async def _confirm_tool_action(
-        self,
-        call: events.CallbackQuery.Event,
-        token: str | None = None,
-        approved: bool = False,
-    ) -> None:
-        if token:
-            future = self._tool_confirmation_waiters.get(token)
-            if future is not None and not future.done():
-                future.set_result(bool(approved))
-        with contextlib.suppress(Exception):
-            await call.answer("Выполняю" if approved else "Отменено", alert=False)
 
     async def _confirm_dangerous_tool(
         self,
@@ -2725,15 +2954,16 @@ class OpenAgent(ModuleBase):
             body = body.replace("{" + key + "}", item)
         buttons = [[
             self.Button.inline(
-                str(self.config.get("tool_confirmation_yes_text", "Выполнить") or "Выполнить"),
+                str(self.config.get("tool_confirmation_yes_text", "") or self.strings("tool_confirmation_yes_text")),
                 self._confirm_tool_action,
                 args=(token, True),
                 style="primary",
             ),
             self.Button.inline(
-                str(self.config.get("tool_confirmation_no_text", "Не сейчас") or "Не сейчас"),
+                str(self.config.get("tool_confirmation_no_text", "") or self.strings("tool_confirmation_no_text")),
                 self._confirm_tool_action,
                 args=(token, False),
+                style="danger",
             ),
         ]]
         try:
@@ -2752,14 +2982,6 @@ class OpenAgent(ModuleBase):
         finally:
             self._tool_confirmation_waiters.pop(token, None)
 
-    @callback(ttl=900)
-    async def _activate_inline_status(self, call: events.CallbackQuery.Event, token: str | None = None) -> None:
-        if token:
-            future = self._inline_status_waiters.get(token)
-            if future is not None and not future.done():
-                future.set_result(call)
-        with contextlib.suppress(Exception):
-            await call.answer()
 
     async def _start_inline_status(
         self,
@@ -2767,9 +2989,32 @@ class OpenAgent(ModuleBase):
         text: str,
         buttons: list[list[Any]],
     ) -> Any:
+        async def edit_with_status_buttons(target_event: Any) -> Any:
+            result = target_event
+            edited_ok = False
+            if hasattr(target_event, "edit"):
+                with contextlib.suppress(Exception):
+                    edited = await target_event.edit(
+                        text,
+                        buttons=buttons,
+                        parse_mode="html",
+                    )
+                    result = edited or target_event
+                    edited_ok = True
+            if not edited_ok:
+                with contextlib.suppress(Exception):
+                    result = await self.edit(target_event, text, as_html=True)
+            for candidate in (target_event, result):
+                with contextlib.suppress(Exception):
+                    setattr(candidate, "_openagent_status_buttons", buttons)
+                with contextlib.suppress(Exception):
+                    setattr(candidate, "_openagent_source_chat_id", getattr(event, "chat_id", None))
+            return result or target_event
+
         chat_id = getattr(event, "chat_id", None)
-        if chat_id is None:
-            return await self.edit(event, text, as_html=True)
+        target = await self._inline_target(event, chat_id)
+        if not target:
+            return await edit_with_status_buttons(event)
 
         token = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
@@ -2777,11 +3022,14 @@ class OpenAgent(ModuleBase):
         self._inline_status_waiters[token] = future
         try:
             _unit, sms = await self.inline(
-                chat_id,
+                target,
                 text,
-                buttons=[[self.Button.inline(" ", self._activate_inline_status, args=(token,))]],
+                buttons=[[self.Button.inline(" ", self._activate_inline_status, args=(token,), style="primary")]],
                 ttl=900,
                 parse_mode="html",
+            )
+            self.log.debug(
+                "OA inline_status: chat_id=%s inline_sms=%s ttl=900", chat_id, bool(sms),
             )
             if sms:
                 with contextlib.suppress(Exception):
@@ -2790,21 +3038,29 @@ class OpenAgent(ModuleBase):
                 call = await asyncio.wait_for(future, timeout=5)
             except asyncio.TimeoutError:
                 call = sms or event
-            if hasattr(call, "edit"):
-                with contextlib.suppress(Exception):
-                    await call.edit(text, buttons=buttons, parse_mode="html")
-            with contextlib.suppress(Exception):
-                setattr(call, "_openagent_status_buttons", buttons)
-            with contextlib.suppress(Exception):
-                setattr(call, "_openagent_source_chat_id", chat_id)
+            await edit_with_status_buttons(call)
             with contextlib.suppress(Exception):
                 await event.delete()
-            return call or sms or event
-        except Exception:
-            return await self.edit(event, text, as_html=True)
+            result = call or sms or event
+            self.log.debug(
+                "OA inline_status OK: chat_id=%s result_type=%s has_edit=%s has_buttons=%s",
+                chat_id, type(result).__name__,
+                hasattr(result, "edit"),
+                hasattr(result, "_openagent_status_buttons"),
+            )
+            return result
+        except Exception as exc:
+            self.log.debug(
+                "OA inline_status FALLBACK: chat_id=%s error=%s",
+                chat_id, exc,
+            )
+            return await edit_with_status_buttons(event)
         finally:
             self._inline_status_waiters.pop(token, None)
 
+
+class _OpenAgentAgentLoopMixin:
+    """Agent loop, tool-call parsing and provider HTTP calls."""
 
     async def _ask_agent(
         self,
@@ -2815,11 +3071,11 @@ class OpenAgent(ModuleBase):
         cancel_token: str | None = None,
         system_override: str | None = None,
         started_at: float | None = None,
-    ) -> tuple[str, list[str], list[str]]:
+    ) -> tuple[str, list[str], list[str], list[dict[str, str]]]:
         provider = self._provider()
         api_key = self._api_key()
         if not api_key:
-            raise RuntimeError(self.strings["no_key"])
+            raise RuntimeError(self.strings("no_key"))
 
         attachments = attachments or []
         if provider == "google":
@@ -2839,6 +3095,7 @@ class OpenAgent(ModuleBase):
         messages.append({"role": "user", "content": user_content})
 
         agent_log: list[str] = []
+        tool_trace: list[dict[str, str]] = []
         if compacted_context:
             agent_log.append("context.compact")
         thinking_notes: list[str] = []
@@ -2867,7 +3124,7 @@ class OpenAgent(ModuleBase):
         ]
         if not think_calls:
             fallback_note = re.sub(r"```.*?```", " ", think_answer or "", flags=re.DOTALL).strip()
-            think_calls = [("thinking.note", "", fallback_note or "Понял задачу, начинаю выполнение.")]
+            think_calls = [("thinking.note", "", fallback_note or self.strings("fallback_thinking_note"))]
         thinking_outputs: list[str] = []
         for tool_name, attrs_raw, body in think_calls[:1]:
             if cancel_token and cancel_token in self._cancelled_generations:
@@ -2883,19 +3140,31 @@ class OpenAgent(ModuleBase):
                 thinking_notes=thinking_notes,
             )
             self._remember_tool_output(chat_id, tool_name, output)
-            thinking_outputs.append(f"Tool <{tool_name}> output:\n{output}")
-        messages.append({"role": "assistant", "content": think_answer or ""})
-        messages.append(
-            {
-                "role": "user",
-                "content": "\n\n".join(thinking_outputs) + "\n\nNow proceed with the actual task.",
-            }
-        )
+            thinking_outputs.append(
+                f"Tool <{tool_name}> call:\n"
+                f"attrs: {attrs_raw or '-'}\n"
+                f"body: {body or '-'}\n"
+                f"output:\n{output}"
+            )
+        think_assistant_msg = {"role": "assistant", "content": think_answer or ""}
+        think_output_msg = {
+            "role": "user",
+            "content": "\n\n".join(thinking_outputs) + "\n\nNow proceed with the actual task.",
+        }
+        messages.append(think_assistant_msg)
+        messages.append(think_output_msg)
+        if thinking_outputs:
+            tool_trace.append(
+                {
+                    "role": "assistant",
+                    "content": "OpenAgent tool trace:\n" + "\n\n".join(thinking_outputs),
+                }
+            )
 
         for _ in range(max_steps):
             if cancel_token and cancel_token in self._cancelled_generations:
                 raise RuntimeError("Generation cancelled")
-                
+
             if provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other"):
                 answer = await self._ask_openai_compatible(provider, messages, api_key)
             elif provider == "google":
@@ -2910,24 +3179,19 @@ class OpenAgent(ModuleBase):
                     invalid_tool_retries += 1
                     agent_log.append(f"tool_error: {tool_error[:220]}")
                     if invalid_tool_retries > 2:
-                        return tool_error, agent_log, thinking_notes
+                        return tool_error, agent_log, thinking_notes, tool_trace
                     messages.append({"role": "assistant", "content": answer or ""})
                     messages.append(
                         {
                             "role": "user",
-                            "content": (
-                                f"{tool_error}\n\n"
-                                "Это результат валидации твоего tool_call. Исправь tool_call и повтори прямо сейчас. "
-                                "Fix the tool call and try again now. Use only valid OpenAgent tool names, "
-                                "valid JSON, and args as a JSON object. If no tool is needed, answer the user "
-                                "in plain text with no JSON/tool_call."
-                            ),
+                            "content": f"{tool_error}\n\n"
+                            + self.strings("tool_validation_retry_prompt"),
                         }
                     )
                     continue
                 clean_answer = (answer or "").strip()
                 if clean_answer or not agent_log:
-                    return clean_answer, agent_log, thinking_notes
+                    return clean_answer, agent_log, thinking_notes, tool_trace
                 break
             invalid_tool_retries = 0
 
@@ -2946,16 +3210,30 @@ class OpenAgent(ModuleBase):
                     thinking_notes=thinking_notes,
                 )
                 self._remember_tool_output(chat_id, tool_name, output)
-                outputs.append(f"Tool <{tool_name}> output:\n{output}")
-            
-            messages.append({"role": "assistant", "content": answer})
+                outputs.append(
+                    f"Tool <{tool_name}> call:\n"
+                    f"attrs: {attrs_raw or '-'}\n"
+                    f"body: {body or '-'}\n"
+                    f"output:\n{output}"
+                )
+
+            assistant_tool_msg = {"role": "assistant", "content": answer}
+            messages.append(assistant_tool_msg)
             followup = "\n\n".join(outputs)
             if any(name != "thinking.note" for name, _attrs, _body in tool_calls):
                 followup += (
                     "\n\nProgress reminder: if you need more tools, include a fresh thinking.note "
                     "with the next tool_call batch unless the task is ready for the final answer."
                 )
-            messages.append({"role": "user", "content": followup})
+            tool_output_msg = {"role": "user", "content": followup}
+            messages.append(tool_output_msg)
+            if outputs:
+                tool_trace.append(
+                    {
+                        "role": "assistant",
+                        "content": "OpenAgent tool trace:\n" + "\n\n".join(outputs),
+                    }
+                )
         # Force one final pass without tool calls if tool-chain limit was reached.
         messages.append(
             {
@@ -2993,8 +3271,8 @@ class OpenAgent(ModuleBase):
                 )
                 clean = (answer or "").strip()
         if clean:
-            return clean, agent_log, thinking_notes
-        return "Инструменты выполнены, но модель не сформировала финальный текст.", agent_log, thinking_notes
+            return clean, agent_log, thinking_notes, tool_trace
+        return self.strings("tools_no_final"), agent_log, thinking_notes, tool_trace
 
     def _tool_names(self) -> set[str]:
         """Single whitelist source for executable tool names and aliases."""
@@ -3135,14 +3413,11 @@ class OpenAgent(ModuleBase):
                 payload = json.loads(raw)
             except Exception as exc:
                 preview = raw.strip().replace("\n", " ")[:500]
-                return (
-                    f"Ошибка tool call: модель вернула некорректный JSON ({exc}).\n"
-                    f"Фрагмент: {preview}"
-                )
+                return self.strings("tool_call_bad_json", error=str(exc), preview=preview)
             payloads = payload if isinstance(payload, list) else [payload]
             for item in payloads:
                 if not isinstance(item, dict):
-                    return "Ошибка tool call: элемент вызова инструмента должен быть JSON-объектом."
+                    return self.strings("tool_call_not_object")
                 tool_name = str(item.get("tool") or item.get("name") or "").lower().strip()
                 if not tool_name:
                     continue
@@ -3150,11 +3425,16 @@ class OpenAgent(ModuleBase):
                     candidates = sorted(self._tool_names())
                     nearest = ", ".join(difflib.get_close_matches(tool_name, candidates, n=5, cutoff=0.45))
                     available = ", ".join(candidates[:30])
-                    hint = f" Ближайшие: {nearest}." if nearest else ""
-                    return f"Ошибка tool call: неизвестный инструмент '{tool_name}'.{hint} Доступные примеры: {available}."
+                    hint = self.strings("tool_call_nearest", nearest=nearest) if nearest else ""
+                    return self.strings(
+                        "tool_call_unknown",
+                        tool_name=tool_name,
+                        hint=hint,
+                        available=available,
+                    )
                 args_raw = item.get("args") or {}
                 if not isinstance(args_raw, dict):
-                    return f"Ошибка tool call: args для '{tool_name}' должен быть JSON-объектом."
+                    return self.strings("tool_call_args_not_object", tool_name=tool_name)
         return ""
 
     def _extract_json_tool_call(self, text: str) -> tuple[str, str, str] | None:
@@ -3250,7 +3530,7 @@ class OpenAgent(ModuleBase):
             return ""
         compacted = self._compact_agent_log(log)
         return (
-            "\n\n<blockquote expandable><b>Agent Log</b>\n"
+            f"\n\n<blockquote expandable><b>{html.escape(self.strings('agent_log_label'))}</b>\n"
             f"{html.escape(chr(10).join(compacted))}</blockquote>"
         )
 
@@ -3406,6 +3686,10 @@ class OpenAgent(ModuleBase):
                 "Increase OpenAgent timeout or use a faster model for this task."
             ) from exc
 
+
+class _OpenAgentResponseMixin:
+    """Response formatting, answer delivery, follow-up and regeneration."""
+
     def _format_inline_markdown(self, text: str) -> str:
         text = html.escape(html.unescape(text or ""))
         text = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", text)
@@ -3450,7 +3734,7 @@ class OpenAgent(ModuleBase):
         thinking_notes: list[str] | None = None,
         buttons: list[list[Any]] | None = None,
     ) -> None:
-        content = f"{title}\n\nЗапрос:\n{prompt}\n\nОтвет:\n{answer}"
+        content = f"{title}\n\n{self.strings('answer_file_request')}:\n{prompt}\n\n{self.strings('answer_file_answer')}:\n{answer}"
         content += "\n\nThinking:\n" + self._format_thinking_notes(thinking_notes)
         if agent_log:
             content += "\n\nAgent Log:\n" + "\n".join(self._compact_agent_log(agent_log))
@@ -3461,7 +3745,12 @@ class OpenAgent(ModuleBase):
             buf.name = "openagent_answer.txt"
             return buf
 
-        caption = f"{title}\n\n<b>Ответ слишком длинный, отправляю файлом.</b>"
+        total_len = len(content)
+        self.log.debug(
+            "OA send_answer_file: chat_id=%s content_len=%d has_edit=%s",
+            getattr(event, "chat_id", None), total_len, hasattr(event, "edit"),
+        )
+        caption = f"{title}\n\n{self.strings('answer_file_too_long')}"
         last_error: Exception | None = None
         if hasattr(event, "edit"):
             try:
@@ -3479,7 +3768,7 @@ class OpenAgent(ModuleBase):
         fallback = html.escape(content[:3000])
         await self.edit(
             event,
-            f"{caption}\n\n<b>Не удалось прикрепить файл к форме, показываю начало:</b>{error}\n\n<blockquote expandable>{fallback}</blockquote>",
+            f"{caption}\n\n{self.strings('answer_file_attach_failed')}{error}\n\n<blockquote expandable>{fallback}</blockquote>",
             as_html=True,
         )
 
@@ -3501,7 +3790,13 @@ class OpenAgent(ModuleBase):
         request_label = self._request_label(thinking_notes=thinking_notes)
         response_label = self._response_label(thinking_notes=thinking_notes)
         agent_log_html = self._agent_log_html(agent_log or [])
-        if len(formatted) + len(formatted_prompt) + len(agent_log_html) > 3500:
+        total_formatted_len = len(formatted) + len(formatted_prompt) + len(agent_log_html)
+        chat_id = getattr(event, "chat_id", None)
+        if total_formatted_len > 3500:
+            self.log.debug(
+                "OA reply_text TOO_LONG→FILE: chat_id=%s total_len=%d limit=3500",
+                chat_id, total_formatted_len,
+            )
             await self._send_answer_file(
                 event,
                 title,
@@ -3514,7 +3809,7 @@ class OpenAgent(ModuleBase):
             return
         chunks = [formatted[i : i + 3500] for i in range(0, len(formatted), 3500)] or [""]
         for index, chunk in enumerate(chunks):
-            header = title if index == 0 else f"{title} <i>continued</i>"
+            header = title if index == 0 else f"{title} <i>{html.escape(self.strings('continued'))}</i>"
             if index == 0:
                 body = (
                     f"{header}\n\n"
@@ -3525,7 +3820,6 @@ class OpenAgent(ModuleBase):
                 body = f"{header}\n\n{response_label}\n<blockquote expandable>{chunk}</blockquote>"
             if index == len(chunks) - 1:
                 body += self._agent_log_html(agent_log or [])
-            chat_id = getattr(event, "chat_id", None)
             if edit_current and hasattr(event, "edit"):
                 try:
                     await event.edit(
@@ -3533,9 +3827,16 @@ class OpenAgent(ModuleBase):
                         parse_mode="html",
                         buttons=buttons if index == len(chunks) - 1 else None,
                     )
+                    self.log.debug(
+                        "OA reply_text EDIT_OK: index=%d/%d chat_id=%s chunk_len=%d",
+                        index, len(chunks) - 1, chat_id, len(chunk),
+                    )
                     continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.log.debug(
+                        "OA reply_text EDIT_FAIL: index=%d/%d chat_id=%s error=%s",
+                        index, len(chunks) - 1, chat_id, exc,
+                    )
             if chat_id is not None:
                 if buttons and index == len(chunks) - 1:
                     try:
@@ -3546,30 +3847,47 @@ class OpenAgent(ModuleBase):
                             ttl=900,
                             parse_mode="html",
                         )
-                    except Exception:
+                        self.log.debug(
+                            "OA reply_text NEW_INLINE: chat_id=%s chunk_len=%d",
+                            chat_id, len(chunk),
+                        )
+                    except Exception as exc:
+                        self.log.debug(
+                            "OA reply_text INLINE_FAIL→SEND_MSG: chat_id=%s error=%s",
+                            chat_id, exc,
+                        )
                         await self.client.send_message(chat_id, body, parse_mode="html")
                 else:
+                    self.log.debug(
+                        "OA reply_text SEND_MSG: chat_id=%s has_buttons=%s index=%d/%d",
+                        chat_id, bool(buttons), index, len(chunks) - 1,
+                    )
                     await self.client.send_message(
                         chat_id,
                         body,
                         parse_mode="html",
                     )
             else:
+                self.log.debug(
+                    "OA reply_text SEND_REPLY: no chat_id, has_reply=%s",
+                    hasattr(event, "reply"),
+                )
                 if hasattr(event, "reply"):
                     await self.reply(event, body, as_html=True)
 
     async def _cancel_generation(self, event: Any, token: str) -> None:
         self._cancelled_generations.add(token)
         try:
-            await event.answer("Отменено", alert=False)
+            await event.answer(self.strings("cancelled"), alert=False)
         except Exception:
             pass
 
     async def _clear_context(self, event: Any, chat_id: int | None) -> None:
         if chat_id is not None:
-            self._chat_history.pop(int(chat_id), None)
+            self._get_active_session(int(chat_id)).messages.clear()
+            self._touch_session(self._get_active_session(int(chat_id)))
         try:
-            await event.answer("Контекст очищен", alert=True)
+            await event.answer(self.strings("context_cleared"), alert=True)
         except Exception:
             pass
 
@@ -3588,6 +3906,8 @@ class OpenAgent(ModuleBase):
         prompt: str,
         full_prompt: str,
         attachments: list[dict[str, str]],
+        *,
+        source_event: Any = None,
     ) -> list[list[Any]]:
         regen_token = str(uuid.uuid4())
         self._regen_payloads[regen_token] = {
@@ -3604,26 +3924,120 @@ class OpenAgent(ModuleBase):
             )[:-50]
             for key in stale:
                 self._regen_payloads.pop(key, None)
-        clear_button = self._direct_button("🧹 Очистить", "clear", {"chat_id": chat_id})
-        regen_button = self._direct_button("🔃 Регенерировать", "regen", {"token": regen_token})
-        return [[clear_button, regen_button]]
+        history_button = self.Button.inline(
+            self.strings("chat_history_button"),
+            self._open_sessions_panel,
+            args=(chat_id,),
+            style="primary",
+        )
+        clear_button = self._direct_button(self.strings("clear_button"), "clear", {"chat_id": chat_id})
+        regen_button = self._direct_button(self.strings("regenerate_button"), "regen", {"token": regen_token})
+        rows: list[list[Any]] = []
+        if source_event is not None:
+            input_key = str(uuid.uuid4())
+            self._input_events[input_key] = {
+                "event": source_event,
+                "chat_id": chat_id,
+                "attachments": attachments,
+                "created_at": time.time(),
+            }
+            if len(self._input_events) > 50:
+                stale_inp = sorted(
+                    self._input_events,
+                    key=lambda k: self._input_events[k].get("created_at", 0),
+                )[:-50]
+                for k in stale_inp:
+                    self._input_events.pop(k, None)
+            input_btn = self.Button.input(
+                self.strings("follow_up_button"),
+                self._on_follow_up_input,
+                placeholder=self.strings("follow_up_placeholder"),
+                allow_user=getattr(source_event, "sender_id", None),
+                style="primary",
+                data=input_key,
+            )
+            rows.append([input_btn])
+        rows.append([regen_button, clear_button, history_button])
+        return rows
+
+    async def _on_follow_up_input(self, event: Any, text: str, data: str) -> None:
+        """Handle follow-up query typed via Button.input on the final response row."""
+        entry = self._input_events.pop(data, None)
+        if not entry or not text or not text.strip():
+            return
+
+        source_event = entry["event"]
+        chat_id = entry.get("chat_id")
+        attachments = entry.get("attachments") or []
+        prompt = text.strip()
+
+        cancel_token = str(uuid.uuid4())
+        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
+        loading = await self._start_inline_status(
+            source_event,
+            self._thinking_text(),
+            [[cancel_button]],
+        )
+        started = time.monotonic()
+        try:
+            answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
+                prompt,
+                status_event=loading or source_event,
+                source_event=source_event,
+                attachments=attachments,
+                cancel_token=cancel_token,
+                started_at=started,
+            )
+            self._last_request_at = time.time()
+            elapsed = time.monotonic() - started
+            self._remember_context(chat_id, prompt, answer, tool_trace)
+            await self._reply_text(
+                loading or source_event,
+                answer,
+                title=self._response_title(
+                    elapsed,
+                    tool_count=len(agent_log),
+                    thinking_notes=thinking_notes,
+                ),
+                prompt=prompt,
+                agent_log=agent_log,
+                thinking_notes=thinking_notes,
+                buttons=self._final_buttons(
+                    chat_id,
+                    prompt,
+                    prompt,
+                    attachments,
+                    source_event=source_event,
+                ),
+                edit_current=True,
+            )
+            self._cancelled_generations.discard(cancel_token)
+        except Exception as exc:
+            self._cancelled_generations.discard(cancel_token)
+            await self.kernel.handle_error(exc, source="OpenAgent:follow_up", event=source_event)
+            with contextlib.suppress(Exception):
+                await self.edit(
+                    loading or source_event,
+                    html.escape(self.strings("error", error=str(exc))),
+                    as_html=True,
+                )
 
     async def _regenerate_response(self, event: Any, token: str) -> None:
         payload = self._regen_payloads.get(token)
         if not payload:
             try:
-                await event.answer("Запрос устарел", alert=True)
+                await event.answer(self.strings("regen_stale"), alert=True)
             except Exception:
                 pass
             return
 
         try:
-            await event.answer("Регенерирую...", alert=False)
+            await event.answer(self.strings("regenerating"), alert=False)
         except Exception:
             pass
 
         cancel_token = str(uuid.uuid4())
-        cancel_button = self._direct_button("Отмена", "cancel", {"token": cancel_token})
+        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
         try:
             edited = await event.edit(
                 self._thinking_text(),
@@ -3640,7 +4054,7 @@ class OpenAgent(ModuleBase):
 
         started = time.monotonic()
         try:
-            answer, agent_log, thinking_notes = await self._ask_agent(
+            answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
                 payload["full_prompt"],
                 status_event=loading or event,
                 source_event=event,
@@ -3649,7 +4063,7 @@ class OpenAgent(ModuleBase):
                 started_at=started,
             )
             elapsed = time.monotonic() - started
-            self._remember_context(payload.get("chat_id"), payload["full_prompt"], answer)
+            self._remember_context(payload.get("chat_id"), payload["full_prompt"], answer, tool_trace)
             await self._reply_text(
                 loading or event,
                 answer,
@@ -3666,6 +4080,7 @@ class OpenAgent(ModuleBase):
                     payload["prompt"],
                     payload["full_prompt"],
                     payload.get("attachments") or [],
+                    source_event=event,
                 ),
                 edit_current=True,
             )
@@ -3681,387 +4096,25 @@ class OpenAgent(ModuleBase):
             except Exception:
                 pass
 
-    @command("oa", alias=["agent"], doc_ru="<запрос> спросить ИИ агента", doc_en="<prompt> ask AI agent")
-    async def cmd_oa(self, event: events.NewMessage.Event) -> None:
-        prompt = self._args_raw(event)
-        reply_context, attachments = await self._reply_context(event)
-        if not prompt and reply_context:
-            prompt = "Проанализируй вложение/сообщение из reply."
-        if not prompt:
-            await self.edit(event, self.strings["need_text"])
-            return
-
-        full_prompt = prompt
-        if reply_context:
-            full_prompt += f"\n\nReply context:\n{reply_context}"
-
-        cancel_token = str(uuid.uuid4())
-        cancel_button = self._direct_button("Отмена", "cancel", {"token": cancel_token})
-        loading = await self._start_inline_status(
-            event,
-            self._thinking_text(),
-            [[cancel_button]],
-        )
-        started = time.monotonic()
-        try:
-            answer, agent_log, thinking_notes = await self._ask_agent(
-                full_prompt,
-                status_event=loading or event,
-                source_event=event,
-                attachments=attachments,
-                cancel_token=cancel_token,
-                started_at=started,
-            )
-            self._last_request_at = time.time()
-            elapsed = time.monotonic() - started
-            self._remember_context(getattr(event, "chat_id", None), full_prompt, answer)
-            await self._reply_text(
-                loading or event,
-                answer,
-                title=self._response_title(
-                    elapsed,
-                    tool_count=len(agent_log),
-                    thinking_notes=thinking_notes,
-                ),
-                prompt=prompt,
-                agent_log=agent_log,
-                thinking_notes=thinking_notes,
-                buttons=self._final_buttons(
-                    getattr(event, "chat_id", None),
-                    prompt,
-                    full_prompt,
-                    attachments,
-                ),
-                edit_current=True,
-            )
-            self._cancelled_generations.discard(cancel_token)
-        except Exception as exc:
-            self._cancelled_generations.discard(cancel_token)
-            await self.kernel.handle_error(exc, source="OpenAgent", event=event)
-            await self.edit(
-                loading or event,
-                html.escape(self.strings("error", error=str(exc))),
-                as_html=True,
-            )
-
-    @command("skills", doc_ru="список скиллов OpenAgent", doc_en="list OpenAgent skills")
-    async def cmd_skills(self, event: events.NewMessage.Event) -> None:
-        arg = self._args_raw(event)
-        if arg in {"-repo", "--repo", "repo"}:
-            try:
-                text = await self._format_skill_repo_list()
-            except Exception as exc:
-                await self.edit(event, html.escape(self.strings("error", error=str(exc))), as_html=True)
-                return
-            await self.edit(event, "<pre>" + html.escape(text) + "</pre>", as_html=True)
-            return
-
-        skills = self._list_skills()
-        if not skills:
-            await self.edit(event, "No OpenAgent skills installed")
-            return
-        lines = []
-        for path in skills:
-            try:
-                text = path.read_text(encoding="utf-8")
-                first_line = text.splitlines()[0] if text.splitlines() else ""
-                frontmatter_name = re.search(r"^name:\s*(.+)$", text, flags=re.MULTILINE)
-                frontmatter_description = re.search(r"^description:\s*(.+)$", text, flags=re.MULTILINE)
-            except Exception:
-                first_line = ""
-                frontmatter_name = None
-                frontmatter_description = None
-            name = frontmatter_name.group(1).strip() if frontmatter_name else self._skill_name_from_path(path)
-            title = frontmatter_description.group(1).strip() if frontmatter_description else first_line.lstrip("# ").strip() if first_line.startswith("#") else name
-            lines.append(f"- {name}: {title}")
-        await self.edit(event, "<pre>" + html.escape("\n".join(lines)) + "</pre>", as_html=True)
-
-    @command("skillinstall", alias=["ssinstall"], doc_ru="<name> установить OpenAgent skill из repo", doc_en="<name> install OpenAgent skill from repo")
-    async def cmd_skillinstall(self, event: events.NewMessage.Event) -> None:
-        name = self._args_raw(event)
-        if not name:
-            await self.edit(event, "Usage: .skillinstall <skill_name>")
-            return
-        try:
-            saved_name = await self._install_repo_skill(name)
-        except Exception as exc:
-            await self.edit(event, html.escape(self.strings("error", error=str(exc))), as_html=True)
-            return
-        await self.edit(event, f"Skill installed: <code>{html.escape(saved_name)}</code>", as_html=True)
-
-    @command("sendss", doc_ru="<name> отправить .md скилл", doc_en="<name> send skill .md")
-    async def cmd_sendss(self, event: events.NewMessage.Event) -> None:
-        name = self._args_raw(event)
-        if not name:
-            await self.edit(event, "Usage: .sendss <skill_name>")
-            return
-        path = self._find_skill_path(name)
-        if not path.exists():
-            await self.edit(event, "Skill not found")
-            return
-        await self.client.send_file(
-            event.chat_id,
-            str(path),
-            caption=f"<b>Skill:</b> <code>{html.escape(self._skill_name_from_path(path))}</code>",
-            parse_mode="html",
-        )
-        try:
-            await event.delete()
-        except Exception:
-            pass
-
-    @command("imss", doc_ru="[name] импортировать .md скилл из reply", doc_en="[name] import .md skill from reply")
-    async def cmd_imss(self, event: events.NewMessage.Event) -> None:
-        reply = await event.get_reply_message()
-        if not reply:
-            await self.edit(event, "Reply to a .md file or markdown message")
-            return
-
-        name = self._args_raw(event)
-        file_name = getattr(getattr(reply, "file", None), "name", None) or ""
-        content = ""
-        try:
-            data = await reply.download_media(file=bytes)
-            if data:
-                content = data.decode("utf-8", errors="replace")
-        except Exception:
-            content = ""
-
-        if not content:
-            content = getattr(reply, "raw_text", None) or getattr(reply, "text", "") or ""
-        if not content.strip():
-            await self.edit(event, "Skill content is empty")
-            return
-
-        if not name:
-            if file_name.lower().endswith(".md"):
-                name = Path(file_name).stem
-            else:
-                match = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
-                name = match.group(1).strip() if match else "skill"
-
-        saved_name = self._save_skill(name, content)
-        await self.edit(event, f"Skill imported: <code>{html.escape(saved_name)}</code>", as_html=True)
-
-    @command("delss", doc_ru="<name> удалить скилл", doc_en="<name> delete skill")
-    async def cmd_delss(self, event: events.NewMessage.Event) -> None:
-        name = self._args_raw(event)
-        if not name:
-            await self.edit(event, "Usage: .delss <skill_name>")
-            return
-        path = self._find_skill_path(name)
-        if not path.exists():
-            await self.edit(event, "Skill not found")
-            return
-        path.unlink()
-        try:
-            if path.name == "SKILL.md" and not any(path.parent.iterdir()):
-                path.parent.rmdir()
-        except Exception:
-            pass
-        await self.edit(event, f"Skill deleted: <code>{html.escape(self._skill_name_from_path(path))}</code>", as_html=True)
 
 
-    # ── Plugin manager ──
 
-    @command("oaplugin", doc_ru="управление плагинами OpenAgent", doc_en="manage OpenAgent plugins")
-    async def cmd_oaplugin(self, event: events.NewMessage.Event) -> None:
-        """Show plugin manager or install a plugin from replied .py file."""
-        if await event.get_reply_message():
-            try:
-                saved_name = await self._install_plugin_from_reply(event)
-            except Exception as exc:
-                await self.edit(event, f"Plugin install failed: <code>{html.escape(str(exc))}</code>", as_html=True)
-                return
-            await self.edit(event, f"Plugin installed: <code>{html.escape(saved_name)}</code>", as_html=True)
-            return
 
-        installed = self._plugins
-        text = "<b>🧩 Включёные плагины:</b>\n"
-        if not installed:
-            text += "\nНет установленных плагинов\n"
-        else:
-            for pname, plugin in installed.items():
-                desc = getattr(plugin, "description", "?") or "?"
-                author = getattr(plugin, "author", "?") or "?"
-                text += f"<blockquote>{pname} - {desc} | by {author}</blockquote>\n"
-        text += f"\n<b>Всего плагинов:</b> {len(installed)}"
 
-        buttons = [[
-            self.Button.inline("📦 Каталог", self._oaplugin_catalog, args=(0,)),
-            self.Button.inline("⚙️ Менеджер", self._oaplugin_manager, args=(0,)),
-        ], [
-            self.Button.inline("❌ Закрыть", self._oaplugin_close),
-        ]]
 
-        chat_id = getattr(event, "chat_id", None)
-        if chat_id:
-            try:
-                await self.inline(chat_id, text, buttons=buttons, ttl=900, parse_mode="html")
-                await event.delete()
-            except Exception:
-                await self.edit(event, text, as_html=True)
-        else:
-            await self.edit(event, text, as_html=True)
 
-    @callback(ttl=900)
-    async def _oaplugin_close(self, call: events.CallbackQuery.Event) -> None:
-        try:
-            await call.delete()
-        except Exception:
-            await call.answer()
 
-    @callback(ttl=900)
-    async def _oaplugin_catalog(self, call: events.CallbackQuery.Event, page: int = 0) -> None:
-        """Show available plugins from repo (xheta-style)."""
-        plugins = self._plugins_cache
-        if not plugins:
-            plugins = await self._fetch_repo_plugins()
-        if not plugins:
-            await call.answer("❌ Нет плагинов в репозитории", alert=True)
-            return
-        if page < 0 or page >= len(plugins):
-            await call.answer()
-            return
-        m = plugins[page]
-        name = m.get("name", "?")
-        author = m.get("author", "?")
-        version = m.get("version", "?")
-        desc = m.get("description", "Нет описания")
-        tools = m.get("tools", [])
-        fname = m.get("file_name", "")
-        installed = fname.replace(".py", "") in {p.name for p in self._plugins.values()}
 
-        text = f"📦 <b>{name}</b> v{version} by <code>{author}</code>\n\n"
-        text += f"📝 {desc}\n"
-        if tools:
-            tools_str = ", ".join(f"<code>{t}</code>" for t in tools[:8])
-            if len(tools) > 8:
-                tools_str += f" ...и ещё {len(tools) - 8}"
-            text += f"\n🔧 <b>Tools:</b> {tools_str}"
-        text += f"\n\n🔢 {page + 1}/{len(plugins)}"
 
-        buttons = []
-        raw_url = m.get("download_url", "")
-        if installed:
-            buttons.append([self.Button.inline("✅ Установлен", self._oaplugin_noop)])
-        else:
-            buttons.append([self.Button.inline("📥 Установить", self._oaplugin_install, args=(fname.replace(".py", ""), page))])
-        if raw_url:
-            buttons[0].append(self.Button.url("📄 Код", raw_url))
 
-        nav = []
-        if page > 0:
-            nav.append(self.Button.inline("⬅️", self._oaplugin_catalog, args=(page - 1,)))
-        nav.append(self.Button.inline(f"📋 {page + 1}/{len(plugins)}", self._oaplugin_noop))
-        if page < len(plugins) - 1:
-            nav.append(self.Button.inline("➡️", self._oaplugin_catalog, args=(page + 1,)))
-        if nav:
-            buttons.append(nav)
-        buttons.append([self.Button.inline("🔙 Назад", self._oaplugin_main)])
 
-        try:
-            await call.edit(text, buttons=buttons, parse_mode="html")
-        except Exception:
-            pass
 
-    @callback(ttl=900)
-    async def _oaplugin_noop(self, call: events.CallbackQuery.Event) -> None:
-        await call.answer()
 
-    @callback(ttl=900)
-    async def _oaplugin_main(self, call: events.CallbackQuery.Event) -> None:
-        """Return to main plugin page."""
-        installed = self._plugins
-        text = "<b>🧩 Включёные плагины:</b>\n"
-        if not installed:
-            text += "\nНет установленных плагинов\n"
-        else:
-            for pname, plugin in installed.items():
-                desc = getattr(plugin, "description", "?") or "?"
-                author = getattr(plugin, "author", "?") or "?"
-                text += f"<blockquote>{pname} - {desc} | by {author}</blockquote>\n"
-        text += f"\n<b>Всего плагинов:</b> {len(installed)}"
-        buttons = [[
-            self.Button.inline("📦 Каталог", self._oaplugin_catalog, args=(0,)),
-            self.Button.inline("⚙️ Менеджер", self._oaplugin_manager, args=(0,)),
-        ], [
-            self.Button.inline("❌ Закрыть", self._oaplugin_close),
-        ]]
-        try:
-            await call.edit(text, buttons=buttons, parse_mode="html")
-        except Exception:
-            pass
 
-    @callback(ttl=900)
-    async def _oaplugin_install(self, call: events.CallbackQuery.Event, name: str, page: int = 0) -> None:
-        """Download and install a plugin from repo."""
-        await call.answer("⏳ Устанавливаю...", alert=False)
-        try:
-            saved_name = await self._install_plugin_from_repo(name)
-            await call.answer(f"✅ {saved_name} установлен!", alert=True)
-        except Exception as exc:
-            await call.answer(f"❌ Ошибка: {exc}", alert=True)
-            return
-        plugins = self._plugins_cache
-        if plugins and page < len(plugins):
-            await self._oaplugin_catalog(call, page)
-        else:
-            await self._oaplugin_catalog(call, 0)
 
-    @callback(ttl=900)
-    async def _oaplugin_manager(self, call: events.CallbackQuery.Event, page: int = 0) -> None:
-        """Show installed plugins with delete option."""
-        installed = list(self._plugins.values())
-        if not installed:
-            await call.answer("Нет установленных плагинов", alert=True)
-            return
-        if page < 0 or page >= len(installed):
-            await call.answer()
-            return
-        plugin = installed[page]
-        text = f"<b>⚙️ {plugin.name}</b>\n"
-        text += f"Версия: {getattr(plugin, 'version', '?')}\n"
-        text += f"Tools: {len(getattr(plugin, 'tool_registry', ()))}\n\n"
-        text += "<b>Действия:</b>"
-        row1 = [self.Button.inline("🗑 Удалить", self._oaplugin_uninstall, args=(plugin.name, page))]
-        buttons = [row1]
-        if len(installed) > 1:
-            nav = []
-            if page > 0:
-                nav.append(self.Button.inline("⬅️", self._oaplugin_manager, args=(page - 1,)))
-            nav.append(self.Button.inline(f"{page + 1}/{len(installed)}", self._oaplugin_noop))
-            if page < len(installed) - 1:
-                nav.append(self.Button.inline("➡️", self._oaplugin_manager, args=(page + 1,)))
-            buttons.append(nav)
-        buttons.append([self.Button.inline("🔙 Назад", self._oaplugin_main)])
-        try:
-            await call.edit(text, buttons=buttons, parse_mode="html")
-        except Exception:
-            pass
 
-    @callback(ttl=900)
-    async def _oaplugin_uninstall(self, call: events.CallbackQuery.Event, name: str, page: int = 0) -> None:
-        """Delete a plugin."""
-        try:
-            name = str(name or "").strip().lower()
-            fpath = self._plugin_files.get(name)
-            self._unregister_plugin(name)
-            plugins_dir = self._resolve_plugins_dir()
-            if fpath and fpath.exists():
-                try:
-                    fpath.relative_to(plugins_dir)
-                    fpath.unlink()
-                except ValueError:
-                    pass
-            for extra in (plugins_dir / f"{name}.py", plugins_dir / f"{name}_plugin.py"):
-                if extra.exists():
-                    extra.unlink()
-            await call.answer(f"🗑 {name} удалён", alert=True)
-        except Exception as exc:
-            await call.answer(f"❌ Ошибка: {exc}", alert=True)
-            return
-        await self._oaplugin_manager(call, min(page, len(self._plugins) - 1) if self._plugins else 0)
+class _OpenAgentToolRegistryMixin:
+    """Built-in tool registry handlers and dispatch."""
 
     def _tool_attr_or_body(self, attrs_raw: str, body: str, *keys: str) -> str:
         attrs = self._parse_xml_attrs(attrs_raw)
@@ -4071,45 +4124,46 @@ class OpenAgent(ModuleBase):
                 return value.strip()
         return (body or "").strip()
 
-
     async def _skills_registry_tool(self, tool_name: str, attrs_raw: str, body: str) -> str:
         await asyncio.sleep(0)
         attrs = self._parse_xml_attrs(attrs_raw)
         if tool_name == "skills.list":
             skills = self._list_skills()
-            return "\n".join(self._skill_name_from_path(path) for path in skills) or "No OpenAgent skills installed"
+            return "\n".join(self._skill_name_from_path(path) for path in skills) or self.strings("skills_empty")
         if tool_name == "skills.repo_list":
             return await self._format_skill_repo_list()
         if tool_name == "skills.install":
             name = attrs.get("name") or body.strip()
             if not name:
-                return "skill name is required"
+                return self.strings("skill_name_required")
             saved = await self._install_repo_skill(name)
-            return f"Skill installed: {saved}"
+            return self.strings("skill_installed", name=saved)
         if tool_name == "skills.activate":
             query = attrs.get("query") or attrs.get("name") or body.strip()
             return self._activate_skill_text(query)
         if tool_name in {"skills.read", "skills.export_md"}:
             name = attrs.get("name") or body.strip()
             if not name:
-                return "skill name is required"
+                return self.strings("skill_name_required")
             path = self._find_skill_path(name)
             if not path.exists():
-                return "Skill not found"
+                return self.strings("skill_not_found")
             return path.read_text(encoding="utf-8", errors="replace")[:12000]
         if tool_name in {"skills.save_from_ai", "skills.import_md", "skill.save", "skill"}:
             name = attrs.get("name") or attrs.get("title") or "skill"
             if not body.strip():
-                return "skill content is empty"
+                return self.strings("skill_empty")
             saved = self._save_skill(name, body)
-            return f"Skill saved: {saved}"
-        return f"Unknown skills tool: {tool_name}"
+            return self.strings("skill_saved", name=saved)
+        return self.strings("unknown_skills_tool", tool=tool_name)
 
     async def _context_registry_tool(self, tool_name: str, attrs_raw: str, body: str, source_event: Any | None) -> str:
         chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
         if tool_name == "context.clear":
             if chat_id is not None:
-                self._chat_history.pop(int(chat_id), None)
+                session = self._get_active_session(int(chat_id))
+                session.messages.clear()
+                self._touch_session(session)
                 self._tool_memory.pop(int(chat_id), None)
             return "Context cleared"
         if tool_name == "context.remember":
@@ -4137,6 +4191,43 @@ class OpenAgent(ModuleBase):
             return "Agent log is shown under the final answer when tools are used"
         if tool_name == "utility.error_file":
             return "Errors are reported through the MCUB kernel error handler"
+        if tool_name == "utility.tool_help":
+            attrs = self._parse_xml_attrs(attrs_raw)
+            query = body.strip() or attrs.get("tool") or ""
+            if not query:
+                return "Specify a tool name, e.g. utility.tool_help tool=message.send"
+            docs = self._get_tool_docs(query)
+            if query not in docs:
+                return f"No documentation found for '{query}'. Available tools: {', '.join(sorted(self._get_tool_map().keys()))}"
+            entry = docs[query]
+            lines = [f"📘 {query}"]
+            lines.append(f"   {entry.get('desc', '')}")
+            if entry.get("args"):
+                lines.append(f"   args: {entry['args']}")
+            if entry.get("body"):
+                lines.append(f"   body: {entry['body']}")
+            if entry.get("dangerous") == "true":
+                lines.append("   ⚠️ requires confirmation")
+            return "\n".join(lines)
+        if tool_name == "utility.list_tools":
+            all_docs = self._get_tool_docs()
+            groups: dict[str, list[str]] = {}
+            for tname, tdoc in sorted(all_docs.items()):
+                group = self._tool_group(tname)
+                groups.setdefault(group, []).append(tname)
+            lines = ["📋 Available tools by category:"]
+            for group in sorted(groups):
+                names = sorted(groups[group])
+                emoji = {
+                    "thinking": "❔", "terminal": "🖥", "web": "🌐", "file": "📦",
+                    "mcub": "🧲", "message": "💬", "dialog": "🗂", "chat": "🐈‍⬛",
+                    "moderation": "🛡", "profile": "👤", "contacts": "👥",
+                    "creation": "✨", "skills": "🧠", "code": "🧬",
+                    "context": "🧾", "todo": "📝", "utility": "🛠",
+                }.get(group, "🛠")
+                items = "\n".join(f"  · {n} — {all_docs.get(n, {}).get('desc', '')}" for n in names)
+                lines.append(f"\n{emoji} {group} ({len(names)}):\n{items}")
+            return "\n".join(lines)[:6000]
         return f"Unknown utility tool: {tool_name}"
 
     async def _todo_registry_tool(self, tool_name: str, attrs_raw: str, body: str) -> str:
@@ -4286,7 +4377,6 @@ class OpenAgent(ModuleBase):
                 pass
         return text
 
-
     def _get_tool_map(self) -> dict[str, str]:
         """Unified mapping of tool tags to internal methods. Merges core + plugin maps.
 
@@ -4329,6 +4419,8 @@ class OpenAgent(ModuleBase):
             "utility.random_template": "_utility_registry_tool",
             "utility.agent_log": "_utility_registry_tool",
             "utility.error_file": "_utility_registry_tool",
+            "utility.tool_help": "_utility_registry_tool",
+            "utility.list_tools": "_utility_registry_tool",
         }
 
         for plugin in self._plugins.values():
@@ -4354,15 +4446,15 @@ class OpenAgent(ModuleBase):
         name = name.lower().strip()
         tmap = self._get_tool_map()
         # Plugin dispatch handles aliases via tool_map.
-        
+
         # 1. Direct match or alias
         method_name = tmap.get(name)
-        
 
-        
+
+
         handler_method = None
         plugin_owner: "OpenAgentPlugin | None" = None
-        
+
         # Check plugin handlers first. Exact tool_map ownership supports
         # legacy aliases like web_search/send_message/dialogs too.
         plugin_owner = self._get_plugin_for_tool(name)
@@ -4390,8 +4482,16 @@ class OpenAgent(ModuleBase):
         display_value = "" if name == "thinking.note" else (attrs_raw or body)
         if self._requires_tool_confirmation(name, attrs_raw, body):
             if not status_event:
+                self.log.debug(
+                    "OA dispatch NO_CONFIRM_FORM: tool=%s no status_event, rejecting",
+                    name,
+                )
                 return f"Tool <{name}> was not executed: user confirmation is required."
             elapsed = time.monotonic() - started_at if started_at is not None else None
+            self.log.debug(
+                "OA dispatch CONFIRM_TOOL: tool=%s status_has_edit=%s",
+                name, hasattr(status_event, "edit"),
+            )
             approved = await self._confirm_dangerous_tool(
                 status_event,
                 name,
@@ -4399,7 +4499,9 @@ class OpenAgent(ModuleBase):
                 elapsed=elapsed,
             )
             if not approved:
+                self.log.debug("OA dispatch TOOL_CANCELLED: tool=%s", name)
                 return f"Tool <{name}> was cancelled by the user. Do not retry it unless the user explicitly asks."
+            self.log.debug("OA dispatch TOOL_APPROVED: tool=%s", name)
         if status_event:
             elapsed = time.monotonic() - started_at if started_at is not None else None
             await self._show_agent_action(
@@ -4411,7 +4513,7 @@ class OpenAgent(ModuleBase):
                 elapsed=elapsed,
                 thinking_notes=thinking_notes,
             )
-            
+
         try:
             # Normalize arguments based on method signature
             sig = inspect.signature(handler_method)
@@ -4436,7 +4538,7 @@ class OpenAgent(ModuleBase):
                 else:
                     kwargs["mode"] = body.strip() or attrs.get("mode") or "private"
             if "target" in params: kwargs["target"] = body.strip() or attrs.get("target", "")
-            
+
             if method_name == "_run_mcub_command" and not kwargs.get("command"):
                 command_map = {
                     "mcub.modules": "modules",
@@ -4479,3 +4581,1610 @@ class OpenAgent(ModuleBase):
                 f"Details: {details[:1200]}\n"
                 "Fix args and retry with a corrected tool call."
             )
+
+
+class OpenAgent(
+    _OpenAgentLifecycleMixin,
+    _OpenAgentProviderMixin,
+    _OpenAgentTodoMixin,
+    _OpenAgentToolDisplayMixin,
+    _OpenAgentContextMixin,
+    _OpenAgentSessionsMixin,
+    _OpenAgentPluginSkillMixin,
+    _OpenAgentRuntimeToolsMixin,
+    _OpenAgentTelegramMediaMixin,
+    _OpenAgentStatusMixin,
+    _OpenAgentAgentLoopMixin,
+    _OpenAgentResponseMixin,
+    _OpenAgentToolRegistryMixin,
+    ModuleBase,
+):
+    name = "OpenAgent"
+    version = "0.7.0-beta"
+    author = "@dev_dolbaeb && @Hairpin00"
+    description = {
+        "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",
+        "en": "AI agent in userbot with refreshed tool architecture",
+        "rofl": "ИИ агент, который делает вид, что всё контролирует",
+        "linux": "AI agent daemon with tool-oriented runtime",
+    }
+    strings = {
+        "ru": {
+            "need_text": "Usage: .oa <request>",
+            "thinking": "Thinking...",
+            "running_terminal": "Running terminal command...",
+            "running_search": "Searching the web...",
+            "no_key": "API key is not configured. Use .cfg OpenAgent api_key",
+            "bad_provider": "Unknown provider. Available: {providers}",
+            "provider_saved": "Provider saved: {provider}",
+            "key_saved": "Provider and API key saved: {provider}",
+            "disabled": "Provider {provider} is not available yet",
+            "error": "OpenAgent error: {error}",
+            "thinking_empty_text": "Модель ещё не думала.",
+            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
+            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
+            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
+            "agent_log_label": "Agent Log",
+            "status_thinking": "Думаю",
+            "status_terminal": "Выполняю команду",
+            "status_web": "Работаю с web",
+            "status_file": "Работаю с файлом",
+            "status_mcub": "Выполняю MCUB-команду",
+            "status_message": "Работаю с сообщениями",
+            "status_chat": "Проверяю чат",
+            "status_dialog": "Проверяю диалоги",
+            "status_code": "Готовлю код",
+            "status_todo": "Обновляю TODO",
+            "status_default": "Выполняю {tool}",
+            "tool_confirmation_approved": "Выполняю",
+            "tool_confirmation_yes_text": "Выполнить",
+            "tool_confirmation_no_text": "Не сейчас",
+            "tool_validation_retry_prompt": "Это результат валидации твоего tool_call. Исправь tool_call и повтори прямо сейчас. Fix the tool call and try again now. Use only valid OpenAgent tool names, valid JSON, and args as a JSON object. If no tool is needed, answer the user in plain text with no JSON/tool_call.",
+            "follow_up_button": "✍️ Продолжить",
+            "follow_up_placeholder": "Введи запрос...",
+            "regen_stale": "Запрос устарел",
+            "regenerating": "Регенерирую...",
+            "new_session_name": "Новый чат",
+            "chat_history_button": "💬 История чатов",
+            "chats_title": "💬 <b>Чаты — этот чат</b>",
+            "chat_empty": "Пока нет сообщений",
+            "chat_today": "сегодня",
+            "chat_yesterday": "вчера",
+            "chat_days_ago": "{days} дн назад",
+            "new_chat_button": "+ Новый чат",
+            "rename_chat_button": "✏️ Переименовать",
+            "delete_chat_button": "🗑 Удалить",
+            "remember_chat_button": "💾 Запомнить выбор",
+            "chat_choice_saved": "Выбор запомнен",
+            "chat_switched": "Чат активен: {name}",
+            "chat_created": "Создан чат: {name}",
+            "chat_renamed": "Чат переименован: {name}",
+            "chat_deleted": "Чат удалён",
+            "chat_delete_last": "Нельзя удалить последний чат",
+            "new_chat_placeholder": "Название (или Enter для авто...)",
+            "rename_chat_placeholder": "Новое название...",
+            "auto_name_prompt": "Придумай короткое название сессии на 3-4 слова. Ответь только названием. Запрос: {prompt}",
+            "oa_choose_chat": "Выбери чат для продолжения или создай новый.",
+            "fallback_thinking_note": "Понял задачу, начинаю выполнение.",
+            "tools_no_final": "Инструменты выполнены, но модель не сформировала финальный текст.",
+            "tool_call_bad_json": "Ошибка tool call: модель вернула некорректный JSON ({error}).\nФрагмент: {preview}",
+            "tool_call_not_object": "Ошибка tool call: элемент вызова инструмента должен быть JSON-объектом.",
+            "tool_call_unknown": "Ошибка tool call: неизвестный инструмент '{tool_name}'.{hint} Доступные примеры: {available}.",
+            "tool_call_nearest": " Ближайшие: {nearest}.",
+            "tool_call_args_not_object": "Ошибка tool call: args для '{tool_name}' должен быть JSON-объектом.",
+            "answer_file_request": "Запрос",
+            "answer_file_answer": "Ответ",
+            "answer_file_too_long": "<b>Ответ слишком длинный, отправляю файлом.</b>",
+            "answer_file_attach_failed": "<b>Не удалось прикрепить файл к форме, показываю начало:</b>",
+            "continued": "continued",
+            "cancelled": "Отменено",
+            "context_cleared": "Контекст очищен",
+            "clear_button": "🧹 Очистить",
+            "regenerate_button": "🔃 Регенерировать",
+            "cancel_button": "Отмена",
+            "reply_analyze_prompt": "Проанализируй вложение/сообщение из reply.",
+            "skills_empty": "No OpenAgent skills installed",
+            "skillinstall_usage": "Usage: .skillinstall <skill_name>",
+            "sendss_usage": "Usage: .sendss <skill_name>",
+            "skill_not_found": "Skill not found",
+            "skill_name_required": "skill name is required",
+            "skill_not_found_repo": "Skill not found in repo: {query}",
+            "skill_saved": "Skill saved: {name}",
+            "unknown_skills_tool": "Unknown skills tool: {tool}",
+            "imss_need_reply": "Reply to a .md file or markdown message",
+            "skill_empty": "Skill content is empty",
+            "delss_usage": "Usage: .delss <skill_name>",
+            "skill_installed": "Skill installed: <code>{name}</code>",
+            "skill_imported": "Skill imported: <code>{name}</code>",
+            "skill_deleted": "Skill deleted: <code>{name}</code>",
+            "plugin_install_failed": "Plugin install failed: <code>{error}</code>",
+            "plugin_installed": "Plugin installed: <code>{name}</code>",
+            "plugins_enabled_title": "<b>🧩 Включёные плагины:</b>\n",
+            "plugins_none_installed": "\nНет установленных плагинов\n",
+            "plugins_total": "\n<b>Всего плагинов:</b> {count}",
+            "plugin_catalog_btn": "📦 Каталог",
+            "plugin_manager_btn": "⚙️ Менеджер",
+            "close_btn": "❌ Закрыть",
+            "plugin_repo_empty": "❌ Нет плагинов в репозитории",
+            "plugin_no_description": "Нет описания",
+            "plugin_more_tools": " ...и ещё {count}",
+            "plugin_tools_label": "Tools",
+            "plugin_installed_btn": "✅ Установлен",
+            "plugin_install_btn": "📥 Установить",
+            "plugin_code_btn": "📄 Код",
+            "back_btn": "🔙 Назад",
+            "plugin_installing": "⏳ Устанавливаю...",
+            "plugin_installed_alert": "✅ {name} установлен!",
+            "generic_error": "❌ Ошибка: {error}",
+            "plugin_manager_no_installed": "Нет установленных плагинов",
+            "plugin_version_label": "Версия",
+            "plugin_actions_title": "<b>Действия:</b>",
+            "plugin_delete_btn": "🗑 Удалить",
+            "plugin_deleted_alert": "🗑 {name} удалён",
+            "oa_chat_choice_title": "💬 <b>Куда отправить запрос?</b>",
+            "remember_pref_continue": "💾 Всегда сюда",
+            "remember_pref_new": "💾 Всегда новый",
+            "pref_saved": "Запомнено",
+        },
+        "en": {
+            "need_text": "Usage: .oa <request>",
+            "thinking": "Thinking...",
+            "running_terminal": "Running terminal command...",
+            "running_search": "Searching the web...",
+            "no_key": "API key is not configured. Use .cfg OpenAgent api_key",
+            "bad_provider": "Unknown provider. Available: {providers}",
+            "provider_saved": "Provider saved: {provider}",
+            "key_saved": "Provider and API key saved: {provider}",
+            "disabled": "Provider {provider} is not available yet",
+            "error": "OpenAgent error: {error}",
+            "thinking_empty_text": "The model has not thought yet.",
+            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
+            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
+            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
+            "agent_log_label": "Agent Log",
+            "status_thinking": "Thinking",
+            "status_terminal": "Running command",
+            "status_web": "Working with web",
+            "status_file": "Working with file",
+            "status_mcub": "Running MCUB command",
+            "status_message": "Working with messages",
+            "status_chat": "Checking chat",
+            "status_dialog": "Checking dialogs",
+            "status_code": "Preparing code",
+            "status_todo": "Updating TODO",
+            "status_default": "Running {tool}",
+            "tool_confirmation_approved": "Running",
+            "tool_confirmation_yes_text": "Run",
+            "tool_confirmation_no_text": "Not now",
+            "tool_validation_retry_prompt": "This is the validation result for your tool_call. Fix the tool call and try again now. Use only valid OpenAgent tool names, valid JSON, and args as a JSON object. If no tool is needed, answer the user in plain text with no JSON/tool_call.",
+            "follow_up_button": "✍️ Continue",
+            "follow_up_placeholder": "Enter request...",
+            "regen_stale": "Request expired",
+            "regenerating": "Regenerating...",
+            "new_session_name": "New chat",
+            "chat_history_button": "💬 Chat history",
+            "chats_title": "💬 <b>Chats — this chat</b>",
+            "chat_empty": "No messages yet",
+            "chat_today": "today",
+            "chat_yesterday": "yesterday",
+            "chat_days_ago": "{days} days ago",
+            "new_chat_button": "+ New chat",
+            "rename_chat_button": "✏️ Rename",
+            "delete_chat_button": "🗑 Delete",
+            "remember_chat_button": "💾 Remember choice",
+            "chat_choice_saved": "Choice remembered",
+            "chat_switched": "Active chat: {name}",
+            "chat_created": "Created chat: {name}",
+            "chat_renamed": "Chat renamed: {name}",
+            "chat_deleted": "Chat deleted",
+            "chat_delete_last": "Cannot delete the last chat",
+            "new_chat_placeholder": "Name (or Enter for auto...)",
+            "rename_chat_placeholder": "New name...",
+            "auto_name_prompt": "Create a short 3-4 word session title. Reply with the title only. Request: {prompt}",
+            "oa_choose_chat": "Choose a chat to continue or create a new one.",
+            "fallback_thinking_note": "Understood the task, starting execution.",
+            "tools_no_final": "Tools ran, but the model did not provide final text.",
+            "tool_call_bad_json": "Tool call error: model returned invalid JSON ({error}).\nFragment: {preview}",
+            "tool_call_not_object": "Tool call error: tool call item must be a JSON object.",
+            "tool_call_unknown": "Tool call error: unknown tool '{tool_name}'.{hint} Available examples: {available}.",
+            "tool_call_nearest": " Nearest: {nearest}.",
+            "tool_call_args_not_object": "Tool call error: args for '{tool_name}' must be a JSON object.",
+            "answer_file_request": "Request",
+            "answer_file_answer": "Answer",
+            "answer_file_too_long": "<b>Answer is too long, sending it as a file.</b>",
+            "answer_file_attach_failed": "<b>Failed to attach the file to the form, showing the beginning:</b>",
+            "continued": "continued",
+            "cancelled": "Cancelled",
+            "context_cleared": "Context cleared",
+            "clear_button": "🧹 Clear",
+            "regenerate_button": "🔃 Regenerate",
+            "cancel_button": "Cancel",
+            "reply_analyze_prompt": "Analyze the replied attachment/message.",
+            "skills_empty": "No OpenAgent skills installed",
+            "skillinstall_usage": "Usage: .skillinstall <skill_name>",
+            "sendss_usage": "Usage: .sendss <skill_name>",
+            "skill_not_found": "Skill not found",
+            "skill_name_required": "skill name is required",
+            "skill_not_found_repo": "Skill not found in repo: {query}",
+            "skill_saved": "Skill saved: {name}",
+            "unknown_skills_tool": "Unknown skills tool: {tool}",
+            "imss_need_reply": "Reply to a .md file or markdown message",
+            "skill_empty": "Skill content is empty",
+            "delss_usage": "Usage: .delss <skill_name>",
+            "skill_installed": "Skill installed: <code>{name}</code>",
+            "skill_imported": "Skill imported: <code>{name}</code>",
+            "skill_deleted": "Skill deleted: <code>{name}</code>",
+            "plugin_install_failed": "Plugin install failed: <code>{error}</code>",
+            "plugin_installed": "Plugin installed: <code>{name}</code>",
+            "plugins_enabled_title": "<b>🧩 Enabled plugins:</b>\n",
+            "plugins_none_installed": "\nNo installed plugins\n",
+            "plugins_total": "\n<b>Total plugins:</b> {count}",
+            "plugin_catalog_btn": "📦 Catalog",
+            "plugin_manager_btn": "⚙️ Manager",
+            "close_btn": "❌ Close",
+            "plugin_repo_empty": "❌ No plugins in repository",
+            "plugin_no_description": "No description",
+            "plugin_more_tools": " ...and {count} more",
+            "plugin_tools_label": "Tools",
+            "plugin_installed_btn": "✅ Installed",
+            "plugin_install_btn": "📥 Install",
+            "plugin_code_btn": "📄 Code",
+            "back_btn": "🔙 Back",
+            "plugin_installing": "⏳ Installing...",
+            "plugin_installed_alert": "✅ {name} installed!",
+            "generic_error": "❌ Error: {error}",
+            "plugin_manager_no_installed": "No installed plugins",
+            "plugin_version_label": "Version",
+            "plugin_actions_title": "<b>Actions:</b>",
+            "plugin_delete_btn": "🗑 Delete",
+            "plugin_deleted_alert": "🗑 {name} deleted",
+            "oa_chat_choice_title": "💬 <b>Where to send the request?</b>",
+            "remember_pref_continue": "💾 Always here",
+            "remember_pref_new": "💾 Always new",
+            "pref_saved": "Remembered",
+        },
+        "rofl": {
+            "need_text": "кинь промпт: .oa <запрос>",
+            "thinking": "мозг греется...",
+            "running_terminal": "консоль делает бррр...",
+            "running_search": "гуглю мемы...",
+            "no_key": "ключика нет, брат. .cfg OpenAgent api_key",
+            "bad_provider": "такого провайдера не завезли. Есть: {providers}",
+            "provider_saved": "провайдер запомнен: {provider}",
+            "key_saved": "провайдер и ключ сохранены: {provider}",
+            "disabled": "провайдер {provider} пока в отпуске",
+            "error": "OpenAgent словил прикол: {error}",
+            "thinking_empty_text": "нейронка пока делает вид, что думает.",
+            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>варит ответ...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
+            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Промптик:</strong>",
+            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Ответик:</strong>",
+            "agent_log_label": "Лог движухи",
+            "status_thinking": "Думаю, мамой клянусь",
+            "status_terminal": "Терминалю",
+            "status_web": "Шарюсь в интернетах",
+            "status_file": "Щупаю файл",
+            "status_mcub": "Дёргаю MCUB",
+            "status_message": "Кручу сообщения",
+            "status_chat": "Смотрю чатик",
+            "status_dialog": "Листаю диалоги",
+            "status_code": "Пишу код без паники",
+            "status_todo": "Туда-сюда TODO",
+            "status_default": "Делаю {tool}",
+            "tool_confirmation_approved": "Ща сделаю",
+            "tool_confirmation_yes_text": "Вжухнуть",
+            "tool_confirmation_no_text": "Не щас",
+            "tool_validation_retry_prompt": "Это результат проверки tool_call. Почини tool_call и повтори прямо сейчас. Используй только валидные OpenAgent tool names, валидный JSON и args как JSON object. Если инструмент не нужен — отвечай текстом без JSON/tool_call.",
+            "follow_up_button": "✍️ Ещё вопросик",
+            "follow_up_placeholder": "Вкидывай запрос...",
+            "regen_stale": "Запрос протух",
+            "regenerating": "Переварю ещё раз...",
+            "new_session_name": "Новый чатик",
+            "chat_history_button": "💬 Чатики",
+            "chats_title": "💬 <b>Чаты — тут</b>",
+            "chat_empty": "пока пусто, как в голове",
+            "chat_today": "сегодня",
+            "chat_yesterday": "вчерась",
+            "chat_days_ago": "{days} дн назад",
+            "new_chat_button": "+ Новый чатик",
+            "rename_chat_button": "✏️ Переобозвать",
+            "delete_chat_button": "🗑 Снести",
+            "remember_chat_button": "💾 Запомнить прикол",
+            "chat_choice_saved": "Запомнил, начальник",
+            "chat_switched": "Теперь активен: {name}",
+            "chat_created": "Чатик создан: {name}",
+            "chat_renamed": "Чатик переобозван: {name}",
+            "chat_deleted": "Чатик снесён",
+            "chat_delete_last": "Последний чатик не дам снести",
+            "new_chat_placeholder": "Название (или Enter для авто...)",
+            "rename_chat_placeholder": "Новое имя чатика...",
+            "auto_name_prompt": "Придумай мемное короткое название сессии на 3-4 слова. Ответь только названием. Запрос: {prompt}",
+            "oa_choose_chat": "Выбери чатик или создай новый.",
+            "fallback_thinking_note": "Задачу понял, погнали.",
+            "tools_no_final": "Инструменты отработали, а модель финал зажала.",
+            "tool_call_bad_json": "tool call кринжанул JSON ({error}).\nФрагмент: {preview}",
+            "tool_call_not_object": "tool call должен быть JSON-объектом, не приколом.",
+            "tool_call_unknown": "не знаю инструмент '{tool_name}'.{hint} Примеры: {available}.",
+            "tool_call_nearest": " Похоже на: {nearest}.",
+            "tool_call_args_not_object": "args для '{tool_name}' должны быть JSON-объектом.",
+            "answer_file_request": "Запросик",
+            "answer_file_answer": "Ответик",
+            "answer_file_too_long": "<b>Ответ жирный, кидаю файлом.</b>",
+            "answer_file_attach_failed": "<b>Файл не прилепился, показываю начало:</b>",
+            "continued": "продолжение банкета",
+            "cancelled": "Отменено, расходимся",
+            "context_cleared": "Контекст помыт",
+            "clear_button": "🧹 Стереть",
+            "regenerate_button": "🔃 Переварить",
+            "cancel_button": "Стопэ",
+            "reply_analyze_prompt": "Глянь вложение/сообщение из reply.",
+            "skills_empty": "Скиллов OpenAgent нет, пустота",
+            "skillinstall_usage": "Юзай: .skillinstall <skill_name>",
+            "sendss_usage": "Юзай: .sendss <skill_name>",
+            "skill_not_found": "Скилл потерялся",
+            "skill_name_required": "нужно имя скилла",
+            "skill_not_found_repo": "Скилл в репе потерялся: {query}",
+            "skill_saved": "Скилл сохранён: {name}",
+            "unknown_skills_tool": "Неизвестный скилл-инструмент: {tool}",
+            "imss_need_reply": "Ответь на .md файл или markdown сообщение",
+            "skill_empty": "Скилл пустой как холодильник",
+            "delss_usage": "Юзай: .delss <skill_name>",
+            "skill_installed": "Скилл установлен: <code>{name}</code>",
+            "skill_imported": "Скилл импортнут: <code>{name}</code>",
+            "skill_deleted": "Скилл удалён: <code>{name}</code>",
+            "plugin_install_failed": "Плагин не взлетел: <code>{error}</code>",
+            "plugin_installed": "Плагин залетел: <code>{name}</code>",
+            "plugins_enabled_title": "<b>🧩 Включёные плагины:</b>\n",
+            "plugins_none_installed": "\nПлагинов ноль, грустно\n",
+            "plugins_total": "\n<b>Всего плагинов:</b> {count}",
+            "plugin_catalog_btn": "📦 Склад",
+            "plugin_manager_btn": "⚙️ Рулёжка",
+            "close_btn": "❌ Закрыть лавочку",
+            "plugin_repo_empty": "❌ В репе плагинов кот наплакал",
+            "plugin_no_description": "Описание украли",
+            "plugin_more_tools": " ...и ещё {count} сверху",
+            "plugin_tools_label": "Инструменты",
+            "plugin_installed_btn": "✅ Уже стоит",
+            "plugin_install_btn": "📥 Вкатить",
+            "plugin_code_btn": "📄 Кодец",
+            "back_btn": "🔙 Назад",
+            "plugin_installing": "⏳ Вкатываю...",
+            "plugin_installed_alert": "✅ {name} вкатился!",
+            "generic_error": "❌ Ошибочка: {error}",
+            "plugin_manager_no_installed": "Плагинов нет",
+            "plugin_version_label": "Версия",
+            "plugin_actions_title": "<b>Движения:</b>",
+            "plugin_delete_btn": "🗑 Снести",
+            "plugin_deleted_alert": "🗑 {name} снесён",
+            "oa_chat_choice_title": "💬 <b>Куда кидаем запрос?</b>",
+            "remember_pref_continue": "💾 Всегда тут",
+            "remember_pref_new": "💾 Всегда новый",
+            "pref_saved": "Запомнил, бро",
+        },
+        "linux": {
+            "need_text": "usage: .oa <request>",
+            "thinking": "forking thoughts...",
+            "running_terminal": "execve(command)...",
+            "running_search": "resolving web query...",
+            "no_key": "api_key: ENOENT. Set .cfg OpenAgent api_key",
+            "bad_provider": "provider: EINVAL. Available: {providers}",
+            "provider_saved": "provider={provider} written",
+            "key_saved": "provider={provider} and api_key written",
+            "disabled": "provider {provider}: ENOSYS",
+            "error": "openagent: {error}",
+            "thinking_empty_text": "no reasoning frames in buffer.",
+            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>spawning response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
+            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> stdin:</strong>",
+            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> stdout:</strong>",
+            "agent_log_label": "syslog",
+            "status_thinking": "reasoning",
+            "status_terminal": "exec command",
+            "status_web": "net I/O",
+            "status_file": "file I/O",
+            "status_mcub": "mcub syscall",
+            "status_message": "message I/O",
+            "status_chat": "stat chat",
+            "status_dialog": "scan dialogs",
+            "status_code": "compile code",
+            "status_todo": "sync TODO",
+            "status_default": "run {tool}",
+            "tool_confirmation_approved": "executing",
+            "tool_confirmation_yes_text": "exec",
+            "tool_confirmation_no_text": "skip",
+            "tool_validation_retry_prompt": "tool_call validation output. Fix the tool call and retry now. Use only valid OpenAgent tool names, valid JSON, and args as a JSON object. If no tool is needed, answer the user in plain text with no JSON/tool_call.",
+            "follow_up_button": "✍️ stdin",
+            "follow_up_placeholder": "type request...",
+            "regen_stale": "request expired",
+            "regenerating": "rerunning...",
+            "new_session_name": "new-chat",
+            "chat_history_button": "💬 sessions",
+            "chats_title": "💬 <b>sessions — current tty</b>",
+            "chat_empty": "empty buffer",
+            "chat_today": "today",
+            "chat_yesterday": "yesterday",
+            "chat_days_ago": "{days}d ago",
+            "new_chat_button": "+ fork session",
+            "rename_chat_button": "✏️ mv session",
+            "delete_chat_button": "🗑 rm session",
+            "remember_chat_button": "💾 persist choice",
+            "chat_choice_saved": "choice persisted",
+            "chat_switched": "active session: {name}",
+            "chat_created": "session created: {name}",
+            "chat_renamed": "session renamed: {name}",
+            "chat_deleted": "session removed",
+            "chat_delete_last": "cannot remove last session",
+            "new_chat_placeholder": "name (or Enter for auto...)",
+            "rename_chat_placeholder": "new name...",
+            "auto_name_prompt": "Create a short 3-4 word session title. Reply with the title only. Request: {prompt}",
+            "oa_choose_chat": "select a session to continue or fork a new one.",
+            "fallback_thinking_note": "task accepted; starting worker.",
+            "tools_no_final": "tools exited 0, final output is empty.",
+            "tool_call_bad_json": "tool_call: JSON parse failed ({error}).\nFragment: {preview}",
+            "tool_call_not_object": "tool_call: item must be a JSON object.",
+            "tool_call_unknown": "tool_call: unknown executable '{tool_name}'.{hint} Examples: {available}.",
+            "tool_call_nearest": " Did you mean: {nearest}.",
+            "tool_call_args_not_object": "tool_call: args for '{tool_name}' must be a JSON object.",
+            "answer_file_request": "stdin",
+            "answer_file_answer": "stdout",
+            "answer_file_too_long": "<b>stdout too large, redirecting to file.</b>",
+            "answer_file_attach_failed": "<b>attach failed, dumping head:</b>",
+            "continued": "continued",
+            "cancelled": "SIGTERM sent",
+            "context_cleared": "context buffer cleared",
+            "clear_button": "🧹 clear",
+            "regenerate_button": "🔃 rerun",
+            "cancel_button": "SIGTERM",
+            "reply_analyze_prompt": "Analyze replied attachment/message.",
+            "skills_empty": "No OpenAgent skills installed",
+            "skillinstall_usage": "usage: .skillinstall <skill_name>",
+            "sendss_usage": "usage: .sendss <skill_name>",
+            "skill_not_found": "skill: ENOENT",
+            "skill_name_required": "skill name is required",
+            "skill_not_found_repo": "skill repo lookup failed: {query}",
+            "skill_saved": "skill saved: {name}",
+            "unknown_skills_tool": "unknown skills tool: {tool}",
+            "imss_need_reply": "reply to a .md file or markdown message",
+            "skill_empty": "skill content is empty",
+            "delss_usage": "usage: .delss <skill_name>",
+            "skill_installed": "skill installed: <code>{name}</code>",
+            "skill_imported": "skill imported: <code>{name}</code>",
+            "skill_deleted": "skill deleted: <code>{name}</code>",
+            "plugin_install_failed": "plugin install failed: <code>{error}</code>",
+            "plugin_installed": "plugin installed: <code>{name}</code>",
+            "plugins_enabled_title": "<b>🧩 loaded plugins:</b>\n",
+            "plugins_none_installed": "\nno loaded plugins\n",
+            "plugins_total": "\n<b>plugin count:</b> {count}",
+            "plugin_catalog_btn": "📦 catalog",
+            "plugin_manager_btn": "⚙️ systemctl",
+            "close_btn": "❌ close",
+            "plugin_repo_empty": "❌ repository index is empty",
+            "plugin_no_description": "no description",
+            "plugin_more_tools": " ...and {count} more",
+            "plugin_tools_label": "Tools",
+            "plugin_installed_btn": "✅ loaded",
+            "plugin_install_btn": "📥 install",
+            "plugin_code_btn": "📄 source",
+            "back_btn": "🔙 back",
+            "plugin_installing": "⏳ installing package...",
+            "plugin_installed_alert": "✅ {name} installed!",
+            "generic_error": "❌ error: {error}",
+            "plugin_manager_no_installed": "no loaded plugins",
+            "plugin_version_label": "Version",
+            "plugin_actions_title": "<b>Actions:</b>",
+            "plugin_delete_btn": "🗑 remove",
+            "plugin_deleted_alert": "🗑 {name} removed",
+            "oa_chat_choice_title": "💬 <b>select target session</b>",
+            "remember_pref_continue": "💾 --always-continue",
+            "remember_pref_new": "💾 --always-new",
+            "pref_saved": "pref written",
+        },
+    }
+    PROVIDERS = (
+        "openai",
+        "google",
+        "openrouter",
+        "groq",
+        "deepseek",
+        "xai",
+        "other",
+    )
+    PROVIDER_LABELS = {
+        "openai": "OpenAI",
+        "google": "Google",
+        "openrouter": "OpenRouter",
+        "groq": "Groq",
+        "deepseek": "DeepSeek",
+        "xai": "xAI",
+        "other": "Other",
+    }
+    DEFAULT_MODELS = {
+        "openai": "gpt-5.5",
+        "google": "gemini-1.5-flash",
+        "openrouter": "openai/gpt-4o-mini",
+        "groq": "llama-3.3-70b-versatile",
+        "deepseek": "deepseek-chat",
+        "xai": "grok-2-latest",
+        "other": "gpt-4o-mini",
+    }
+    BASE_URLS = {
+        "openai": "https://api.openai.com/v1",
+        "google": "https://generativelanguage.googleapis.com/v1beta",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "groq": "https://api.groq.com/openai/v1",
+        "deepseek": "https://api.deepseek.com/v1",
+        "xai": "https://api.x.ai/v1",
+    }
+    WEB_SEARCH_RE = re.compile(
+        r"<web_search>\s*(.*?)\s*</web_search>", re.DOTALL | re.I
+    )
+    SEND_RE = re.compile(
+        r'<send_message(?:\s+chat=["\']([^"\']+)["\'])?\s*>(.*?)</send_message>',
+        re.DOTALL | re.I,
+    )
+    SKILL_RE = re.compile(
+        r'<skill\s+name=["\']([^"\']+)["\']\s*>(.*?)</skill>', re.DOTALL | re.I
+    )
+    CREATE_CHANNEL_RE = re.compile(
+        r"<create_channel([^>]*)>(.*?)</create_channel>", re.DOTALL | re.I
+    )
+    CREATE_GROUP_RE = re.compile(
+        r"<create_group([^>]*)>(.*?)</create_group>", re.DOTALL | re.I
+    )
+    CREATE_BOT_RE = re.compile(
+        r"<create_bot([^>]*)>(.*?)</create_bot>", re.DOTALL | re.I
+    )
+    SEARCH_MESSAGES_RE = re.compile(
+        r"<search_messages([^>]*)>(.*?)</search_messages>", re.DOTALL | re.I
+    )
+    UPDATE_PROFILE_RE = re.compile(
+        r"<update_profile([^>]*)>(.*?)</update_profile>", re.DOTALL | re.I
+    )
+    SET_PROFILE_PHOTO_RE = re.compile(
+        r"<set_profile_photo([^>]*)>(.*?)</set_profile_photo>", re.DOTALL | re.I
+    )
+    DELETE_MESSAGES_RE = re.compile(
+        r"<delete_messages([^>]*)>(.*?)</delete_messages>", re.DOTALL | re.I
+    )
+    FORWARD_MESSAGE_RE = re.compile(
+        r"<forward_message([^>]*)>(.*?)</forward_message>", re.DOTALL | re.I
+    )
+    DOWNLOAD_MEDIA_RE = re.compile(
+        r"<download_media([^>]*)>(.*?)</download_media>", re.DOTALL | re.I
+    )
+    GENERATED_FILE_RE = re.compile(
+        r'<file\s+name=["\']([^"\']+)["\']\s*>(.*?)</file>',
+        re.DOTALL | re.I,
+    )
+    MCUB_DOCS_URL = "https://x0.at/y2rb.md"
+    TOOL_CALL_RE = re.compile(r"<([a-z0-9._]+)([^>]*)>(.*?)</\1>|<([a-z0-9._]+)([^>]*)/?>", re.DOTALL | re.I)
+    TOOL_CALL_JSON_RE = re.compile(r"```tool_call\s*(.*?)```", re.DOTALL | re.I)
+    TOOL_REGISTRY = (
+        # Core/module-tied tools. Most tools should come from plugins.
+        "thinking.note",
+        "skills.list", "skills.read", "skills.activate", "skills.import_md", "skills.export_md", "skills.save_from_ai", "skills.install", "skills.repo_list",
+        "code.generate_file", "code.generate_mcub_module", "code.choose_filename", "code.attach_result", "code.read_docs",
+        "context.remember", "context.clear", "context.regenerate", "context.reply_context", "context.media_context",
+        "todo.add", "todo.delete", "todo.edit", "todo.current", "todo.close", "todo.closeall", "todo.clear",
+        "utility.token_usage", "utility.placeholders", "utility.random_template", "utility.agent_log", "utility.error_file",
+        "utility.tool_help", "utility.list_tools",
+    )
+    AGENT_MAX_STEPS = 15
+    PREMIUM_EMOJIS = {
+        "claude": '<tg-emoji emoji-id="5368808376694248152">💬</tg-emoji>',
+        "start": '<tg-emoji emoji-id="5368434680179758177">🏁</tg-emoji>',
+        "workout": '<tg-emoji emoji-id="5368387680352637360">🏋️‍♂️</tg-emoji>',
+        "party": '<tg-emoji emoji-id="5368635272332352173">🎉</tg-emoji>',
+        "loading_dots": '<tg-emoji emoji-id="5328311576736833844">🔴</tg-emoji>',
+        "loading_wait": '<tg-emoji emoji-id="5326015457155620929">😐</tg-emoji>',
+        "loading_squares": '<tg-emoji emoji-id="5334960765931626355">🎲</tg-emoji>',
+        "loading_lava": '<tg-emoji emoji-id="5310041868191407556">🩸</tg-emoji>',
+        "soon": '<tg-emoji emoji-id="5411382892850871522">🔜</tg-emoji>',
+        "top": '<tg-emoji emoji-id="5411132595041765682">🔝</tg-emoji>',
+        "linux": '<tg-emoji emoji-id="5300957668762987048">👩‍💻</tg-emoji>',
+        "js": '<tg-emoji emoji-id="5300896259320586992">👩‍💻</tg-emoji>',
+        "ts": '<tg-emoji emoji-id="5301254000031572585">👩‍💻</tg-emoji>',
+        "grid": '<tg-emoji emoji-id="5294096239464295059">🔵</tg-emoji>',
+        "done": '<tg-emoji emoji-id="4916036072560919511">✅</tg-emoji>',
+        "warn": '<tg-emoji emoji-id="4915853119839011973">⚠️</tg-emoji>',
+        "link": '<tg-emoji emoji-id="4916086774649848789">🔗</tg-emoji>',
+        "web": '<tg-emoji emoji-id="4906943755644306322">🌐</tg-emoji>',
+        "telegram": '<tg-emoji emoji-id="4918203446202467778">💙</tg-emoji>',
+        "at": '<tg-emoji emoji-id="5082413149873767213">💙</tg-emoji>',
+        "lock": '<tg-emoji emoji-id="4904500559203009298">🔒</tg-emoji>',
+        "bubble": '<tg-emoji emoji-id="4918408122868958076">🖱️</tg-emoji>',
+        "back": '<tg-emoji emoji-id="5352759161945867747">🔙</tg-emoji>',
+        "block": '<tg-emoji emoji-id="5408830797513784663">🚫</tg-emoji>',
+        "blink": '<tg-emoji emoji-id="5411528341918356895">⚪️</tg-emoji>',
+        "terminal": '<tg-emoji emoji-id="5409076727341154520">⚙️</tg-emoji>',
+        "num_0": '<tg-emoji emoji-id="5140999334174655345">0️⃣</tg-emoji>',
+        "num_1": '<tg-emoji emoji-id="5141109049114232089">1️⃣</tg-emoji>',
+        "num_2": '<tg-emoji emoji-id="5140871649091912628">2️⃣</tg-emoji>',
+        "num_3": '<tg-emoji emoji-id="5141399818400170896">3️⃣</tg-emoji>',
+        "num_4": '<tg-emoji emoji-id="5138822752123225428">4️⃣</tg-emoji>',
+        "num_5": '<tg-emoji emoji-id="5141062672057369534">5️⃣</tg-emoji>',
+        "num_6": '<tg-emoji emoji-id="5139005588881015916">6️⃣</tg-emoji>',
+        "num_7": '<tg-emoji emoji-id="5140999557512954818">7️⃣</tg-emoji>',
+        "num_8": '<tg-emoji emoji-id="5141013683660391172">8️⃣</tg-emoji>',
+        "num_9": '<tg-emoji emoji-id="5141137309999039199">9️⃣</tg-emoji>',
+    }
+    config = ModuleConfig(
+        ConfigValue(
+            "provider",
+            "openai",
+            description="Provider: openai, google, openrouter, groq, deepseek, xai, other",
+            validator=Choice(choices=list(PROVIDERS), default="openai"),
+        ),
+        ConfigValue(
+            "api_key",
+            "",
+            description="API key for the selected provider",
+            validator=Secret(default=""),
+        ),
+        ConfigValue(
+            "model",
+            "",
+            description="Model name. Empty means provider default",
+            validator=String(default=""),
+        ),
+        ConfigValue(
+            "custom_base_url",
+            "",
+            description="Endpoint for provider=other, e.g. https://api.deepseek.com/v1",
+            validator=String(default=""),
+        ),
+        ConfigValue(
+            "system_prompt",
+            "You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed.",
+            description="System prompt for the agent",
+            validator=String(
+                default="You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed."
+            ),
+        ),
+        ConfigValue(
+            "temperature",
+            0.7,
+            description="Sampling temperature",
+            validator=Float(default=0.7, min=0.0, max=2.0),
+        ),
+        ConfigValue(
+            "max_tokens",
+            1200,
+            description="Maximum response tokens",
+            validator=Integer(default=1200, min=64, max=32768),
+        ),
+        ConfigValue(
+            "reasoning_effort",
+            "off",
+            description="Reasoning effort for models/providers that support it: off, low, medium, high, xhigh",
+            validator=Choice(choices=["off", "low", "medium", "high", "xhigh"], default="off"),
+        ),
+        ConfigValue(
+            "timeout",
+            180,
+            description="HTTP timeout seconds for each provider request. Increase for slow reasoning/code tasks.",
+            validator=Integer(default=180, min=10, max=600),
+        ),
+        ConfigValue(
+            "terminal_enabled",
+            True,
+            description="Allow the agent to execute terminal commands",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "terminal_steps",
+            3,
+            description="Maximum terminal commands per request",
+            validator=Integer(default=3, min=0, max=10),
+        ),
+        ConfigValue(
+            "terminal_timeout",
+            30,
+            description="Terminal command timeout seconds",
+            validator=Integer(default=30, min=3, max=120),
+        ),
+        ConfigValue(
+            "web_search_enabled",
+            True,
+            description="Allow the agent to search the web",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "web_search_steps",
+            3,
+            description="Maximum web searches per request",
+            validator=Integer(default=3, min=0, max=10),
+        ),
+        ConfigValue(
+            "mcub_use",
+            False,
+            description="Allow the agent to execute MCUB userbot commands",
+            validator=Boolean(default=False),
+        ),
+        ConfigValue(
+            "mcub_steps",
+            3,
+            description="Maximum MCUB commands per request",
+            validator=Integer(default=3, min=0, max=10),
+        ),
+        ConfigValue(
+            "send_messages_enabled",
+            True,
+            description="Allow the agent to send messages as the userbot",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "send_message_steps",
+            3,
+            description="Maximum userbot messages sent per request",
+            validator=Integer(default=3, min=0, max=10),
+        ),
+        ConfigValue(
+            "create_chats_enabled",
+            True,
+            description="Allow the agent to create channels/groups",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "create_chat_steps",
+            2,
+            description="Maximum channels/groups created per request",
+            validator=Integer(default=2, min=0, max=5),
+        ),
+        ConfigValue(
+            "create_bots_enabled",
+            True,
+            description="Allow the agent to create Telegram bots via BotFather",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "create_bot_steps",
+            1,
+            description="Maximum Telegram bots created per request",
+            validator=Integer(default=1, min=0, max=3),
+        ),
+        ConfigValue(
+            "account_tools_enabled",
+            True,
+            description="Allow the agent to edit profile/join chats/read/search messages",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "account_tool_steps",
+            5,
+            description="Maximum account-level tools per request",
+            validator=Integer(default=5, min=0, max=15),
+        ),
+        ConfigValue(
+            "chat_management_enabled",
+            True,
+            description="Allow the agent to manage chats: mute, ban, promote, title, slowmode",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "chat_management_steps",
+            5,
+            description="Maximum chat-management tools per request",
+            validator=Integer(default=5, min=0, max=15),
+        ),
+        ConfigValue(
+            "media_max_bytes",
+            8_000_000,
+            description="Maximum replied media bytes sent to AI",
+            validator=Integer(default=8_000_000, min=1024, max=25_000_000),
+        ),
+        ConfigValue(
+            "context_enabled",
+            True,
+            description="Remember chat context between .oa requests",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "context_turns",
+            10,
+            description="How many user/assistant turns to remember per chat",
+            validator=Integer(default=10, min=0, max=50),
+        ),
+        ConfigValue(
+            "context_compaction_enabled",
+            True,
+            description="Automatically summarize old chat context when it becomes too large",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "context_compaction_chars",
+            18000,
+            description="Compact remembered chat context after this many characters",
+            validator=Integer(default=18000, min=2000, max=200000),
+        ),
+        ConfigValue(
+            "context_compaction_keep_turns",
+            2,
+            description="Recent user/assistant turns to keep verbatim after compaction",
+            validator=Integer(default=2, min=0, max=10),
+        ),
+        ConfigValue(
+            "context_compaction_max_tokens",
+            900,
+            description="Maximum tokens used for the compaction summary response",
+            validator=Integer(default=900, min=128, max=4096),
+        ),
+        ConfigValue(
+            "tool_memory_enabled",
+            False,
+            description="Remember concise notes from tool outputs for next requests",
+            validator=Boolean(default=False),
+        ),
+        ConfigValue(
+            "tool_memory_items",
+            20,
+            description="Maximum remembered tool notes per chat",
+            validator=Integer(default=20, min=1, max=200),
+        ),
+        ConfigValue(
+            "tool_memory_max_chars",
+            500,
+            description="Maximum characters per remembered tool note",
+            validator=Integer(default=500, min=80, max=4000),
+        ),
+        ConfigValue(
+            "response_header",
+            "<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>",
+            description="Final response header template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>"),
+        ),
+        ConfigValue(
+            "request_label",
+            "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
+            description="Request block label template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            validator=String(default="<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>"),
+        ),
+        ConfigValue(
+            "response_label",
+            "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
+            description="Response block label template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            validator=String(default="<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>"),
+        ),
+        ConfigValue(
+            "thinking_template",
+            "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
+            description="Initial loading/thinking message template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>"),
+        ),
+        ConfigValue(
+            "tool_display_template",
+            "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
+            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General: {provider}, {model}, {reasoning_effort}, {elapsed}, {thinking}, {random}, {prefix}, {time}, {date}",
+            validator=String(
+                default="<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
+            ),
+        ),
+        ConfigValue(
+            "tool_status_emojis",
+            "thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠",
+            description="Custom emoji/icon map for {status_emoji}/{status_icon}. Format: group_or_tool=emoji per line. Tool-specific keys like terminal.run or thinking.note override groups like terminal/thinking. Premium emoji HTML is allowed via {status_emoji_html}/{status_icon_html}.",
+            validator=String(default="thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠"),
+        ),
+        ConfigValue(
+            "tool_display_max_chars",
+            1200,
+            description="Maximum chars from current tool input shown in status form",
+            validator=Integer(default=1200, min=80, max=4000),
+        ),
+        ConfigValue(
+            "tool_display_log_lines",
+            8,
+            description="How many recent tool names to show in status form",
+            validator=Integer(default=8, min=0, max=30),
+        ),
+        ConfigValue(
+            "thinking_display_limit",
+            3,
+            description="How many recent thinking.note entries to show in {thinking}",
+            validator=Integer(default=3, min=0, max=20),
+        ),
+        ConfigValue(
+            "thinking_empty_text",
+            "Модель ещё не думала.",
+            description="Text for {thinking} when no thinking.note entries exist",
+            validator=String(default="Модель ещё не думала."),
+        ),
+        ConfigValue(
+            "thinking_bullet",
+            "•",
+            description="Prefix marker for each thinking.note line in {thinking}. Empty disables the marker",
+            validator=String(default="•"),
+        ),
+        ConfigValue(
+            "random_strings",
+            ["Thinking...", "Думаю...", "Генерирую..."],
+            description="Random lines for {random}",
+            validator=List(default=["Thinking...", "Думаю...", "Генерирую..."], item_type=str),
+        ),
+        ConfigValue(
+            "todo_status_emojis",
+            "pending=...\nopen=>>>\nclosed=---",
+            description="State markers for {todo}. Format: pending=..., open=>>>, closed=---",
+            validator=String(default="pending=...\nopen=>>>\nclosed=---"),
+        ),
+        ConfigValue(
+            "placeholders",
+            "",
+            description="Available OpenAgent placeholders (auto-generated)",
+            validator=String(default=""),
+        ),
+        ConfigValue(
+            "repo_context_enabled",
+            True,
+            description="Inject local workspace snapshot into system prompt",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "repo_context_max_chars",
+            7000,
+            description="Maximum chars used for repo context in system prompt",
+            validator=Integer(default=7000, min=500, max=30000),
+        ),
+        ConfigValue(
+            "skills_enabled",
+            True,
+            description="Enable loading OpenAgent skills into the system prompt",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "skills_trigger_mode",
+            "auto",
+            description="When to load skills: auto = only on keyword match, always = every request, off = never",
+            validator=String(default="auto"),
+        ),
+        ConfigValue(
+            "skill_repo_url",
+            "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills",
+            description="Base URL for installable OpenAgent skills repository",
+            validator=String(default="https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills"),
+        ),
+        ConfigValue(
+            "tool_confirmation_enabled",
+            True,
+            description="Ask for confirmation before tools that can change files, chats, account state, or run commands",
+            validator=Boolean(default=True),
+        ),
+        ConfigValue(
+            "tool_confirmation_mode",
+            "medium",
+            description="How often to ask before tools: low = only critical/destructive, medium = write/actions, high = almost every non-read tool",
+            validator=Choice(choices=["low", "medium", "high"], default="medium"),
+        ),
+        ConfigValue(
+            "tool_confirmation_template",
+            "<blockquote><a href=\"tg://emoji?id=6010201728773790293\">😈</a> Continue?\n<a href=\"tg://emoji?id=6012317326584583729\">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6010394680179562842\">😶</a> <b>What will be completed</b>\n<a href=\"tg://emoji?id=6010292550152230657\">☀️</a> <code>{value}</code></blockquote>",
+            description="Confirmation form template. Placeholders: {tool}, {value}, {elapsed}, {elapsed_line}",
+            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010201728773790293\">😈</a> Continue?\n<a href=\"tg://emoji?id=6012317326584583729\">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6010394680179562842\">😶</a> <b>What will be completed</b>\n<a href=\"tg://emoji?id=6010292550152230657\">☀️</a> <code>{value}</code></blockquote>"),
+        ),
+        ConfigValue(
+            "tool_confirmation_yes_text",
+            "Выполнить",
+            description="Confirm button text for dangerous tools",
+            validator=String(default="Выполнить"),
+        ),
+        ConfigValue(
+            "tool_confirmation_no_text",
+            "Не сейчас",
+            description="Cancel button text for dangerous tools",
+            validator=String(default="Не сейчас"),
+        ),
+        ConfigValue(
+            "tool_confirmation_timeout",
+            900,
+            description="Seconds to wait for dangerous tool confirmation",
+            validator=Integer(default=900, min=10, max=3600),
+        ),
+    )
+    SESSION_LIMIT = 20
+    class _MCUBEvent:
+        def __init__(self, outer: "OpenAgent", source_event: Any, text: str) -> None:
+            self._outer = outer
+            self._source_event = source_event
+            self.text = text
+            self.raw_text = text
+            self.message = self
+            self.client = outer.client
+            self.chat_id = getattr(source_event, "chat_id", None)
+            self.sender_id = getattr(outer.kernel, "ADMIN_ID", None) or getattr(
+                source_event, "sender_id", None
+            )
+            self.id = getattr(source_event, "id", 0)
+            self.out = True
+            self.piped = True
+            self.pipe_input = None
+            self.pipe_output = None
+            self.pipe_exit_code = 0
+            self.no_add_args_to_input = False
+            self._outputs: list[str] = []
+
+        async def edit(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
+            await asyncio.sleep(0)
+            self._outputs.append(str(text))
+            return self
+
+        async def reply(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
+            await asyncio.sleep(0)
+            self._outputs.append(str(text))
+            return self
+
+        async def respond(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
+            await asyncio.sleep(0)
+            self._outputs.append(str(text))
+            return self
+
+        async def delete(self, *args: Any, **kwargs: Any) -> None:
+            await asyncio.sleep(0)
+            return None
+
+        async def get_reply_message(self) -> Any:
+            if hasattr(self._source_event, "get_reply_message"):
+                return await self._source_event.get_reply_message()
+            return None
+
+        async def get_chat(self) -> Any:
+            if hasattr(self._source_event, "get_chat"):
+                return await self._source_event.get_chat()
+            return None
+
+        async def get_sender(self) -> Any:
+            if hasattr(self._source_event, "get_sender"):
+                return await self._source_event.get_sender()
+            return None
+
+        @property
+        def output(self) -> str:
+            return "\n\n".join(self._outputs).strip()
+
+    @callback(ttl=900)
+    async def _open_sessions_panel(self, call: events.CallbackQuery.Event, chat_id: int | None = None) -> None:
+        cid = int(chat_id or getattr(call, "chat_id", 0) or getattr(call, "_openagent_source_chat_id", 0) or 0)
+        if not cid:
+            await call.answer(self.strings("error", error="chat_id is missing"), alert=True)
+            return
+        await self._show_sessions_panel(call, cid)
+
+    @callback(ttl=900)
+    async def _switch_session(self, call: events.CallbackQuery.Event, session_id: str) -> None:
+        session = self._sessions.get(str(session_id))
+        if session is None:
+            await call.answer(self.strings("skill_not_found"), alert=True)
+            return
+        self._set_active_session(session.chat_id, session.id)
+        await self._show_sessions_panel(
+            call,
+            session.chat_id,
+            alert=self.strings("chat_switched", name=session.name),
+        )
+
+    @callback(ttl=900)
+    async def _remember_session_choice(self, call: events.CallbackQuery.Event, chat_id: int) -> None:
+        await self._save_sessions()
+        await call.answer(self.strings("chat_choice_saved"), alert=True)
+
+    @callback(ttl=900)
+    async def _delete_active_session(self, call: events.CallbackQuery.Event, chat_id: int) -> None:
+        cid = int(chat_id)
+        sessions = self._get_chat_sessions(cid)
+        if len(sessions) <= 1:
+            await call.answer(self.strings("chat_delete_last"), alert=True)
+            return
+        active = self._get_active_session(cid)
+        self._sessions.pop(active.id, None)
+        remaining = self._get_chat_sessions(cid)
+        self._active_session[cid] = remaining[0].id
+        await self._save_sessions()
+        await self._show_sessions_panel(call, cid, alert=self.strings("chat_deleted"))
+
+    @callback(ttl=900)
+    async def _run_pending_here(self, call: events.CallbackQuery.Event, prompt_token: str) -> None:
+        """Run pending prompt in the current active session."""
+        await self._execute_pending(call, prompt_token)
+
+    @callback(ttl=900)
+    async def _run_pending_in(
+        self,
+        call: events.CallbackQuery.Event,
+        prompt_token: str,
+        session_id: str,
+    ) -> None:
+        """Switch to another session, then run the pending prompt."""
+        chat_id = (
+            getattr(call, "chat_id", None)
+            or self._pending_prompts.get(prompt_token, {}).get("chat_id")
+        )
+        if chat_id:
+            self._set_active_session(int(chat_id), session_id)
+        await self._execute_pending(call, prompt_token)
+
+    @callback(ttl=900)
+    async def _remember_pref_continue(
+        self,
+        call: events.CallbackQuery.Event,
+        prompt_token: str,
+        chat_id: int,
+    ) -> None:
+        """Save 'always continue here' pref then run pending in current session."""
+        self.session_manager.set_preference(int(chat_id), "continue")
+        with contextlib.suppress(Exception):
+            await call.answer(self.strings("pref_saved"), alert=False)
+        await self._execute_pending(call, prompt_token)
+
+    @callback(ttl=900)
+    async def _remember_pref_new(
+        self,
+        call: events.CallbackQuery.Event,
+        prompt_token: str,
+        chat_id: int,
+    ) -> None:
+        """Save 'always create new' pref, create new session, then run."""
+        cid = int(chat_id)
+        self.session_manager.set_preference(cid, "new")
+        self._new_session(cid)
+        with contextlib.suppress(Exception):
+            await call.answer(self.strings("pref_saved"), alert=False)
+        await self._execute_pending(call, prompt_token)
+
+    @callback(ttl=900)
+    async def _confirm_tool_action(
+        self,
+        call: events.CallbackQuery.Event,
+        token: str | None = None,
+        approved: bool = False,
+    ) -> None:
+        if token:
+            future = self._tool_confirmation_waiters.get(token)
+            if future is not None and not future.done():
+                future.set_result(bool(approved))
+        with contextlib.suppress(Exception):
+            await call.answer(
+                self.strings("tool_confirmation_approved") if approved else self.strings("cancelled"),
+                alert=False,
+            )
+
+    @callback(ttl=900)
+    async def _activate_inline_status(self, call: events.CallbackQuery.Event, token: str | None = None) -> None:
+        if token:
+            future = self._inline_status_waiters.get(token)
+            if future is not None and not future.done():
+                future.set_result(call)
+        with contextlib.suppress(Exception):
+            await call.answer()
+
+    @command(
+        "oa",
+        alias=["agent"],
+        doc_ru="<запрос> спросить ИИ агента; --chats открыть меню чатов; --clear очистить текущий чат",
+        doc_en="<prompt> ask AI agent; --chats open chat menu; --clear clear current chat",
+    )
+    async def cmd_oa(self, event: events.NewMessage.Event) -> None:
+        prompt = self._args_raw(event)
+        if prompt.strip() == "--clear":
+            chat_id = getattr(event, "chat_id", None)
+            if chat_id is not None:
+                session = self._get_active_session(int(chat_id))
+                session.messages.clear()
+                self._tool_memory.pop(int(chat_id), None)
+                self._touch_session(session)
+                await self.edit(event, html.escape(self.strings("context_cleared")), as_html=True)
+            else:
+                await self.edit(event, self.strings("need_text"))
+            return
+        if prompt.strip() == "--chats":
+            chat_id = getattr(event, "chat_id", None)
+            if chat_id is not None:
+                await self._show_sessions_panel(event, int(chat_id), force_inline=True)
+            else:
+                await self.edit(event, self.strings("need_text"))
+            return
+        reply_context, attachments = await self._reply_context(event)
+        if not prompt and reply_context:
+            prompt = self.strings("reply_analyze_prompt")
+        if not prompt:
+            chat_id = getattr(event, "chat_id", None)
+            if chat_id is not None:
+                await self._show_sessions_panel(event, int(chat_id), force_inline=True)
+            else:
+                await self.edit(event, self.strings("need_text"))
+            return
+
+        full_prompt = prompt
+        if reply_context:
+            full_prompt += f"\n\nReply context:\n{reply_context}"
+
+        chat_id = getattr(event, "chat_id", None)
+        if chat_id is not None:
+            pref = self._session_prefs.get(int(chat_id), "ask")
+            sessions = self._get_chat_sessions(int(chat_id))
+            if pref == "new":
+                self._new_session(int(chat_id))
+            elif pref == "ask" and len(sessions) > 1:
+                prompt_token = self._store_pending_prompt(
+                    int(chat_id), prompt, full_prompt, attachments
+                )
+                await self._show_oa_choice_panel(event, int(chat_id), prompt_token)
+                return
+
+        cancel_token = str(uuid.uuid4())
+        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
+        self.log.debug(
+            "OA cmd_oa: chat_id=%s prompt_len=%d reply=%s attachments=%d",
+            chat_id, len(prompt), bool(reply_context), len(attachments or []),
+        )
+        loading = await self._start_inline_status(
+            event,
+            self._thinking_text(),
+            [[cancel_button]],
+        )
+        started = time.monotonic()
+        self.log.debug(
+            "OA cmd_oa: status_event type=%s has_edit=%s has_status_buttons=%s",
+            type(loading).__name__,
+            hasattr(loading, "edit"),
+            hasattr(loading, "_openagent_status_buttons"),
+        )
+        try:
+            answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
+                full_prompt,
+                status_event=loading or event,
+                source_event=event,
+                attachments=attachments,
+                cancel_token=cancel_token,
+                started_at=started,
+            )
+            self._last_request_at = time.time()
+            elapsed = time.monotonic() - started
+            self._remember_context(getattr(event, "chat_id", None), full_prompt, answer, tool_trace)
+            await self._reply_text(
+                loading or event,
+                answer,
+                title=self._response_title(
+                    elapsed,
+                    tool_count=len(agent_log),
+                    thinking_notes=thinking_notes,
+                ),
+                prompt=prompt,
+                agent_log=agent_log,
+                thinking_notes=thinking_notes,
+                buttons=self._final_buttons(
+                    getattr(event, "chat_id", None),
+                    prompt,
+                    full_prompt,
+                    attachments,
+                    source_event=event,
+                ),
+                edit_current=True,
+            )
+            self._cancelled_generations.discard(cancel_token)
+        except Exception as exc:
+            self._cancelled_generations.discard(cancel_token)
+            await self.kernel.handle_error(exc, source="OpenAgent", event=event)
+            await self.edit(
+                loading or event,
+                html.escape(self.strings("error", error=str(exc))),
+                as_html=True,
+            )
+
+    @command("skills", doc_ru="список скиллов OpenAgent", doc_en="list OpenAgent skills")
+    async def cmd_skills(self, event: events.NewMessage.Event) -> None:
+        arg = self._args_raw(event)
+        if arg in {"-repo", "--repo", "repo"}:
+            try:
+                text = await self._format_skill_repo_list()
+            except Exception as exc:
+                await self.edit(event, html.escape(self.strings("error", error=str(exc))), as_html=True)
+                return
+            await self.edit(event, "<pre>" + html.escape(text) + "</pre>", as_html=True)
+            return
+
+        skills = self._list_skills()
+        if not skills:
+            await self.edit(event, self.strings("skills_empty"))
+            return
+        lines = []
+        for path in skills:
+            try:
+                text = path.read_text(encoding="utf-8")
+                first_line = text.splitlines()[0] if text.splitlines() else ""
+                frontmatter_name = re.search(r"^name:\s*(.+)$", text, flags=re.MULTILINE)
+                frontmatter_description = re.search(r"^description:\s*(.+)$", text, flags=re.MULTILINE)
+            except Exception:
+                first_line = ""
+                frontmatter_name = None
+                frontmatter_description = None
+            name = frontmatter_name.group(1).strip() if frontmatter_name else self._skill_name_from_path(path)
+            title = frontmatter_description.group(1).strip() if frontmatter_description else first_line.lstrip("# ").strip() if first_line.startswith("#") else name
+            lines.append(f"- {name}: {title}")
+        await self.edit(event, "<pre>" + html.escape("\n".join(lines)) + "</pre>", as_html=True)
+
+    @command("skillinstall", alias=["ssinstall"], doc_ru="<name> установить OpenAgent skill из repo", doc_en="<name> install OpenAgent skill from repo")
+    async def cmd_skillinstall(self, event: events.NewMessage.Event) -> None:
+        name = self._args_raw(event)
+        if not name:
+            await self.edit(event, self.strings("skillinstall_usage"))
+            return
+        try:
+            saved_name = await self._install_repo_skill(name)
+        except Exception as exc:
+            await self.edit(event, html.escape(self.strings("error", error=str(exc))), as_html=True)
+            return
+        await self.edit(event, self.strings("skill_installed", name=html.escape(saved_name)), as_html=True)
+
+    @command("sendss", doc_ru="<name> отправить .md скилл", doc_en="<name> send skill .md")
+    async def cmd_sendss(self, event: events.NewMessage.Event) -> None:
+        name = self._args_raw(event)
+        if not name:
+            await self.edit(event, self.strings("sendss_usage"))
+            return
+        path = self._find_skill_path(name)
+        if not path.exists():
+            await self.edit(event, self.strings("skill_not_found"))
+            return
+        await self.client.send_file(
+            event.chat_id,
+            str(path),
+            caption=f"<b>Skill:</b> <code>{html.escape(self._skill_name_from_path(path))}</code>",
+            parse_mode="html",
+        )
+        try:
+            await event.delete()
+        except Exception:
+            pass
+
+    @command("imss", doc_ru="[name] импортировать .md скилл из reply", doc_en="[name] import .md skill from reply")
+    async def cmd_imss(self, event: events.NewMessage.Event) -> None:
+        reply = await event.get_reply_message()
+        if not reply:
+            await self.edit(event, self.strings("imss_need_reply"))
+            return
+
+        name = self._args_raw(event)
+        file_name = getattr(getattr(reply, "file", None), "name", None) or ""
+        content = ""
+        try:
+            data = await reply.download_media(file=bytes)
+            if data:
+                content = data.decode("utf-8", errors="replace")
+        except Exception:
+            content = ""
+
+        if not content:
+            content = getattr(reply, "raw_text", None) or getattr(reply, "text", "") or ""
+        if not content.strip():
+            await self.edit(event, self.strings("skill_empty"))
+            return
+
+        if not name:
+            if file_name.lower().endswith(".md"):
+                name = Path(file_name).stem
+            else:
+                match = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
+                name = match.group(1).strip() if match else "skill"
+
+        saved_name = self._save_skill(name, content)
+        await self.edit(event, self.strings("skill_imported", name=html.escape(saved_name)), as_html=True)
+
+    @command("delss", doc_ru="<name> удалить скилл", doc_en="<name> delete skill")
+    async def cmd_delss(self, event: events.NewMessage.Event) -> None:
+        name = self._args_raw(event)
+        if not name:
+            await self.edit(event, self.strings("delss_usage"))
+            return
+        path = self._find_skill_path(name)
+        if not path.exists():
+            await self.edit(event, self.strings("skill_not_found"))
+            return
+        path.unlink()
+        try:
+            if path.name == "SKILL.md" and not any(path.parent.iterdir()):
+                path.parent.rmdir()
+        except Exception:
+            pass
+        await self.edit(event, self.strings("skill_deleted", name=html.escape(self._skill_name_from_path(path))), as_html=True)
+
+    @command("oaplugin", doc_ru="управление плагинами OpenAgent", doc_en="manage OpenAgent plugins")
+    async def cmd_oaplugin(self, event: events.NewMessage.Event) -> None:
+        """Show plugin manager or install a plugin from replied .py file."""
+        if await event.get_reply_message():
+            try:
+                saved_name = await self._install_plugin_from_reply(event)
+            except Exception as exc:
+                await self.edit(event, self.strings("plugin_install_failed", error=html.escape(str(exc))), as_html=True)
+                return
+            await self.edit(event, self.strings("plugin_installed", name=html.escape(saved_name)), as_html=True)
+            return
+
+        installed = self._plugins
+        text = self.strings("plugins_enabled_title")
+        if not installed:
+            text += self.strings("plugins_none_installed")
+        else:
+            for pname, plugin in installed.items():
+                desc = getattr(plugin, "description", "?") or "?"
+                author = getattr(plugin, "author", "?") or "?"
+                text += f"<blockquote>{pname} - {desc} | by {author}</blockquote>\n"
+        text += self.strings("plugins_total", count=len(installed))
+
+        buttons = [[
+            self.Button.inline(self.strings("plugin_catalog_btn"), self._oaplugin_catalog, args=(0,), style="primary"),
+            self.Button.inline(self.strings("plugin_manager_btn"), self._oaplugin_manager, args=(0,), style="primary"),
+        ], [
+            self.Button.inline(self.strings("close_btn"), self._oaplugin_close, style="danger"),
+        ]]
+
+        chat_id = getattr(event, "chat_id", None)
+        if chat_id:
+            try:
+                await self.inline(chat_id, text, buttons=buttons, ttl=900, parse_mode="html")
+                await event.delete()
+            except Exception:
+                await self.edit(event, text, as_html=True)
+        else:
+            await self.edit(event, text, as_html=True)
+
+    @callback(ttl=900)
+    async def _oaplugin_close(self, call: events.CallbackQuery.Event) -> None:
+        try:
+            await call.delete()
+        except Exception:
+            await call.answer()
+
+    @callback(ttl=900)
+    async def _oaplugin_catalog(self, call: events.CallbackQuery.Event, page: int = 0) -> None:
+        """Show available plugins from repo (xheta-style)."""
+        plugins = self._plugins_cache
+        if not plugins:
+            plugins = await self._fetch_repo_plugins()
+        if not plugins:
+            await call.answer(self.strings("plugin_repo_empty"), alert=True)
+            return
+        if page < 0 or page >= len(plugins):
+            await call.answer()
+            return
+        m = plugins[page]
+        name = m.get("name", "?")
+        author = m.get("author", "?")
+        version = m.get("version", "?")
+        desc = m.get("description", self.strings("plugin_no_description"))
+        tools = m.get("tools", [])
+        fname = m.get("file_name", "")
+        plugin_key = self._safe_plugin_name(m.get("plugin_name") or fname.replace(".py", "") or name)
+        installed = plugin_key in self._plugins
+
+        text = f"📦 <b>{name}</b> v{version} by <code>{author}</code>\n\n"
+        text += f"📝 {desc}\n"
+        if tools:
+            tools_str = ", ".join(f"<code>{t}</code>" for t in tools[:8])
+            if len(tools) > 8:
+                tools_str += self.strings("plugin_more_tools", count=len(tools) - 8)
+            text += f"\n🔧 <b>{html.escape(self.strings('plugin_tools_label'))}:</b> {tools_str}"
+        text += f"\n\n🔢 {page + 1}/{len(plugins)}"
+
+        buttons = []
+        raw_url = m.get("download_url", "")
+        if installed:
+            buttons.append([self.Button.inline(self.strings("plugin_installed_btn"), self._oaplugin_noop, style="primary")])
+        else:
+            buttons.append([self.Button.inline(self.strings("plugin_install_btn"), self._oaplugin_install, args=(fname.replace(".py", ""), page), style="primary")])
+        if raw_url:
+            buttons[0].append(self.Button.url(self.strings("plugin_code_btn"), raw_url))
+
+        nav = []
+        if page > 0:
+            nav.append(self.Button.inline("⬅️", self._oaplugin_catalog, args=(page - 1,), style="primary"))
+        nav.append(self.Button.inline(f"📋 {page + 1}/{len(plugins)}", self._oaplugin_noop, style="primary"))
+        if page < len(plugins) - 1:
+            nav.append(self.Button.inline("➡️", self._oaplugin_catalog, args=(page + 1,), style="primary"))
+        if nav:
+            buttons.append(nav)
+        buttons.append([self.Button.inline(self.strings("back_btn"), self._oaplugin_main, style="primary")])
+
+        try:
+            await call.edit(text, buttons=buttons, parse_mode="html")
+        except Exception:
+            pass
+
+    @callback(ttl=900)
+    async def _oaplugin_noop(self, call: events.CallbackQuery.Event) -> None:
+        await call.answer()
+
+    @callback(ttl=900)
+    async def _oaplugin_main(self, call: events.CallbackQuery.Event) -> None:
+        """Return to main plugin page."""
+        installed = self._plugins
+        text = self.strings("plugins_enabled_title")
+        if not installed:
+            text += self.strings("plugins_none_installed")
+        else:
+            for pname, plugin in installed.items():
+                desc = getattr(plugin, "description", "?") or "?"
+                author = getattr(plugin, "author", "?") or "?"
+                text += f"<blockquote>{pname} - {desc} | by {author}</blockquote>\n"
+        text += self.strings("plugins_total", count=len(installed))
+        buttons = [[
+            self.Button.inline(self.strings("plugin_catalog_btn"), self._oaplugin_catalog, args=(0,), style="primary"),
+            self.Button.inline(self.strings("plugin_manager_btn"), self._oaplugin_manager, args=(0,), style="primary"),
+        ], [
+            self.Button.inline(self.strings("close_btn"), self._oaplugin_close, style="danger"),
+        ]]
+        try:
+            await call.edit(text, buttons=buttons, parse_mode="html")
+        except Exception:
+            pass
+
+    @callback(ttl=900)
+    async def _oaplugin_install(self, call: events.CallbackQuery.Event, name: str, page: int = 0) -> None:
+        """Download and install a plugin from repo."""
+        await call.answer(self.strings("plugin_installing"), alert=False)
+        try:
+            saved_name = await self._install_plugin_from_repo(name)
+            await call.answer(self.strings("plugin_installed_alert", name=saved_name), alert=True)
+        except Exception as exc:
+            await call.answer(self.strings("generic_error", error=str(exc)), alert=True)
+            return
+        plugins = self._plugins_cache
+        if plugins and page < len(plugins):
+            await self._oaplugin_catalog(call, page)
+        else:
+            await self._oaplugin_catalog(call, 0)
+
+    @callback(ttl=900)
+    async def _oaplugin_manager(self, call: events.CallbackQuery.Event, page: int = 0) -> None:
+        """Show installed plugins with delete option."""
+        installed = list(self._plugins.values())
+        if not installed:
+            await call.answer(self.strings("plugin_manager_no_installed"), alert=True)
+            return
+        if page < 0 or page >= len(installed):
+            await call.answer()
+            return
+        plugin = installed[page]
+        text = f"<b>⚙️ {plugin.name}</b>\n"
+        text += f"{html.escape(self.strings('plugin_version_label'))}: {getattr(plugin, 'version', '?')}\n"
+        text += f"Tools: {len(getattr(plugin, 'tool_registry', ()))}\n\n"
+        text += self.strings("plugin_actions_title")
+        row1 = [self.Button.inline(self.strings("plugin_delete_btn"), self._oaplugin_uninstall, args=(plugin.name, page), style="danger")]
+        buttons = [row1]
+        if len(installed) > 1:
+            nav = []
+            if page > 0:
+                nav.append(self.Button.inline("⬅️", self._oaplugin_manager, args=(page - 1,), style="primary"))
+            nav.append(self.Button.inline(f"{page + 1}/{len(installed)}", self._oaplugin_noop, style="primary"))
+            if page < len(installed) - 1:
+                nav.append(self.Button.inline("➡️", self._oaplugin_manager, args=(page + 1,), style="primary"))
+            buttons.append(nav)
+        buttons.append([self.Button.inline(self.strings("back_btn"), self._oaplugin_main, style="primary")])
+        try:
+            await call.edit(text, buttons=buttons, parse_mode="html")
+        except Exception:
+            pass
+
+    @callback(ttl=900)
+    async def _oaplugin_uninstall(self, call: events.CallbackQuery.Event, name: str, page: int = 0) -> None:
+        """Delete a plugin."""
+        try:
+            name = self._safe_plugin_name(name)
+            fpath = self._plugin_files.get(name)
+            is_builtin = bool(fpath and self._is_builtin_plugin_file(fpath))
+            if is_builtin:
+                self._disabled_plugins.add(name)
+                self._save_disabled_plugins()
+            self._unregister_plugin(name)
+            plugins_dir = self._resolve_plugins_dir()
+            if fpath and fpath.exists() and not is_builtin:
+                try:
+                    fpath.resolve().relative_to(plugins_dir.resolve())
+                    fpath.unlink()
+                except ValueError:
+                    pass
+            if not is_builtin:
+                for extra in (plugins_dir / f"{name}.py", plugins_dir / f"{name}_plugin.py"):
+                    if extra.exists():
+                        extra.unlink()
+            await call.answer(self.strings("plugin_deleted_alert", name=name), alert=True)
+        except Exception as exc:
+            await call.answer(self.strings("generic_error", error=str(exc)), alert=True)
+            return
+        await self._oaplugin_manager(call, min(page, len(self._plugins) - 1) if self._plugins else 0)
