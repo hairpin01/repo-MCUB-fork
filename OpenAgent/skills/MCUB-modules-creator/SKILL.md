@@ -108,7 +108,7 @@ import core.lib.loader.module_config as cfg
 class ExampleModule(loader.ModuleBase):
     name = "Example"
     version = "1.0.0"
-    author = "@you"
+    author = "by Example, model: {AI model}, total token: {tokens}. @Example"
     description: dict[str, str] = {
         "ru": "Oпиcaниe мoдyля",
         "en": "Module description",
@@ -118,6 +118,19 @@ class ExampleModule(loader.ModuleBase):
     async def cmd_example(self, event: events.NewMessage.Event) -> None:
         await self.edit(event, "Example works!")
 ```
+
+Author metadata rule for AI-created modules:
+
+- When this skill creates or substantially rewrites a module with an AI model, set the class metadata `author` to this format:
+
+```python
+author = "by {module_name}, model: {ai_model}, total token: {total_tokens}. @{module_name}"
+```
+
+- Replace `{module_name}` with the actual MCUB module `name` value.
+- Replace `{ai_model}` with the AI model name if known; otherwise use `unknown`.
+- Replace `{total_tokens}` with the total token count if known; otherwise use `unknown`.
+- Preserve explicit human author/port attribution only when the user asks to keep it; otherwise use the AI-created format above for generated debug modules.
 
 ## Import organization
 
