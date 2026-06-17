@@ -5548,7 +5548,7 @@ class OpenAgent(
     ModuleBase,
 ):
     name = "OpenAgent"
-    version = "0.8.0-dev.build:1040"
+    version = "0.8.0-main.build:1040"
     author = "@dev_dolbaeb && @Hairpin00"
     description = {
         "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",
