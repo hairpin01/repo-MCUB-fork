@@ -41,7 +41,7 @@ class WebPlugin:
     }
 
     config_defaults = {
-        "timeout": 30,
+        "web_timeout": 30,
     }
 
     def __init__(self, agent: Any) -> None:
@@ -86,7 +86,7 @@ class WebPlugin:
         if self._looks_like_url(query):
             url = query if query.startswith(("http://", "https://")) else "https://" + query
             headers = {"User-Agent": "Mozilla/5.0"}
-            timeout = aiohttp.ClientTimeout(total=int(self.agent.config["timeout"]))
+            timeout = aiohttp.ClientTimeout(total=int(self.agent.config.get("web_timeout", 30) or 30))
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
                 async with session.get(url, allow_redirects=True) as resp:
                     text = await resp.text(errors="replace")
@@ -99,7 +99,7 @@ class WebPlugin:
         
         url = f"https://duckduckgo.com/html/?q={quote(query)}"
         headers = {"User-Agent": "Mozilla/5.0"}
-        timeout = aiohttp.ClientTimeout(total=int(self.agent.config["timeout"]))
+        timeout = aiohttp.ClientTimeout(total=int(self.agent.config.get("web_timeout", 30) or 30))
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.get(url) as resp:
                 text = await resp.text()
