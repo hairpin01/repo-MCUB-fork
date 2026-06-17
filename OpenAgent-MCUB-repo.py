@@ -371,6 +371,32 @@ class OpenAgentPlugin:
     def agent(self) -> "OpenAgent":
         return self._agent
 
+    def add_runtime_comment(self, runtime_token: str | None, comment: str) -> bool:
+        """Queue a live comment for the current OpenAgent run."""
+        return self._agent.add_runtime_comment(runtime_token, comment)
+
+    def create_background_tool_task(
+        self,
+        *,
+        tool_name: str,
+        attrs_raw: str = "",
+        body: str = "",
+        source_event: Any | None = None,
+        status_event: Any | None = None,
+        runtime_token: str | None = None,
+        label: str = "",
+    ) -> str:
+        """Run an OpenAgent tool in background and comment when it finishes."""
+        return self._agent.create_background_tool_task(
+            tool_name=tool_name,
+            attrs_raw=attrs_raw,
+            body=body,
+            source_event=source_event,
+            status_event=status_event,
+            runtime_token=runtime_token,
+            label=label,
+        )
+
     async def on_load(self) -> None:
         """Called after plugin is registered."""
         pass
@@ -429,7 +455,7 @@ class _OpenAgentLifecycleMixin:
             "request_label": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
             "response_label": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
             "thinking_template": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            "tool_display_template": "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
+            "tool_display_template": "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
             "tool_status_emojis": "thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠",
             "tool_display_max_chars": 1200,
             "tool_display_log_lines": 8,
@@ -486,6 +512,7 @@ class _OpenAgentLifecycleMixin:
         self._session_input_events: dict[str, dict[str, Any]] = {}
         self._pending_prompts: dict[str, dict[str, Any]] = {}
         self._runtime_comments: dict[str, list[str]] = {}
+        self._background_tool_tasks: dict[str, asyncio.Task[Any]] = {}
         self._inline_status_waiters: dict[str, asyncio.Future[Any]] = {}
         # Per-chat reference to the last inline response form so follow-up
         # Button.input edits it in place instead of posting a new message.
@@ -630,11 +657,19 @@ class _OpenAgentProviderMixin:
             values[f"emoji_{key}"] = value
         return values
 
+    def _event_chat_id(self, event: Any | None) -> int | None:
+        if event is None:
+            return None
+        chat_id = getattr(event, "chat_id", None) or getattr(event, "_openagent_source_chat_id", None)
+        with contextlib.suppress(Exception):
+            return int(chat_id) if chat_id is not None else None
+        return None
+
     def _set_placeholder_context(self, event: Any | None = None, cancel_token: str | None = None) -> None:
         chat_id = None
         user_id = None
         if event is not None:
-            chat_id = getattr(event, "chat_id", None) or getattr(event, "_openagent_source_chat_id", None)
+            chat_id = self._event_chat_id(event)
             user_id = getattr(event, "sender_id", None) or getattr(event, "user_id", None)
         self._placeholder_context = {
             "chat_id": chat_id,
@@ -926,6 +961,7 @@ class _OpenAgentToolDisplayMixin:
         log: list[str],
         elapsed: float | None,
         thinking_notes: list[str] | None,
+        tool_done: bool = False,
     ) -> dict[str, str]:
         step = len(log)
         total = self.AGENT_MAX_STEPS
@@ -953,6 +989,12 @@ class _OpenAgentToolDisplayMixin:
             f"out {self._last_token_usage.get('output_tokens', 0)} | "
             f"total {self._last_token_usage.get('total_tokens', 0)}"
         )
+        tool_running_emoji = "✍️"
+        tool_done_emoji = "🌙"
+        tool_running_emoji_html = '<tg-emoji emoji-id="5220046725493828505">✍️</tg-emoji>'
+        tool_done_emoji_html = '<tg-emoji emoji-id="5253521692008917018">🌙</tg-emoji>'
+        tool_state_emoji = tool_done_emoji if tool_done else tool_running_emoji
+        tool_state_emoji_html = tool_done_emoji_html if tool_done else tool_running_emoji_html
         progress_percent = str(int(round(100 * min(step, total) / max(1, total))))
         return {
             "round": str(step),
@@ -964,6 +1006,19 @@ class _OpenAgentToolDisplayMixin:
             "status_emoji_html": status_emoji,
             "status_icon_html": status_emoji,
             "status_text": html.escape(status_text),
+            "tool_state": "done" if tool_done else "running",
+            "tool_state_emoji": tool_state_emoji,
+            "tool_state_icon": tool_state_emoji,
+            "tool_state_emoji_html": tool_state_emoji_html,
+            "tool_state_icon_html": tool_state_emoji_html,
+            "tool_running_emoji": tool_running_emoji,
+            "tool_running_icon": tool_running_emoji,
+            "tool_running_emoji_html": tool_running_emoji_html,
+            "tool_running_icon_html": tool_running_emoji_html,
+            "tool_done_emoji": tool_done_emoji,
+            "tool_done_icon": tool_done_emoji,
+            "tool_done_emoji_html": tool_done_emoji_html,
+            "tool_done_icon_html": tool_done_emoji_html,
             "tool_group": html.escape(group),
             "tool_short": html.escape(short),
             "tool_input": tool_input,
@@ -988,6 +1043,7 @@ class _OpenAgentToolDisplayMixin:
         log: list[str],
         elapsed: float | None = None,
         thinking_notes: list[str] | None = None,
+        tool_done: bool = False,
     ) -> str:
         max_chars = int(self.config.get("tool_display_max_chars", 30) or 30)
         log_lines = int(self.config.get("tool_display_log_lines", 8) or 8)
@@ -1024,11 +1080,12 @@ class _OpenAgentToolDisplayMixin:
                 log=log,
                 elapsed=elapsed,
                 thinking_notes=thinking_notes,
+                tool_done=tool_done,
             )
         )
         template = str(self.config.get("tool_display_template", "") or "")
         if not template:
-            template = "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
+            template = "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
         for key, item in values.items():
             template = template.replace("{" + key + "}", item)
         return template
@@ -1882,6 +1939,32 @@ class _OpenAgentPluginSkillMixin:
                     await self._register_plugin_from_file(fpath)
                 except Exception as exc:
                     self.log.warning(f"Plugin load failed: {fpath.name} - {exc}")
+        await self._reload_plugin_config_values()
+        self._refresh_live_config_schema()
+
+    async def _reload_plugin_config_values(self) -> None:
+        """Reload persisted config after plugins add dynamic ConfigValues."""
+        try:
+            get_config = getattr(self.kernel, "get_module_config", None)
+            if not get_config:
+                return
+            saved = await get_config(self.name)
+            if saved and hasattr(self.config, "from_dict"):
+                self.config.from_dict(saved)
+        except Exception as exc:
+            self.log.warning(f"OpenAgent: failed to reload plugin config values: {exc}")
+
+    def _refresh_live_config_schema(self) -> None:
+        """Expose plugin-added ConfigValues to MCUB config UI."""
+        with contextlib.suppress(Exception):
+            store_schema = getattr(self.kernel, "store_module_config_schema", None)
+            if callable(store_schema):
+                store_schema(self.name, self.config)
+                return
+        with contextlib.suppress(Exception):
+            if not hasattr(self.kernel, "_live_module_configs"):
+                self.kernel._live_module_configs = {}
+            self.kernel._live_module_configs[self.name] = self.config
 
     async def _register_plugin_from_file(self, fpath: Path) -> None:
         """Import a .py file, find *Plugin class, register it."""
@@ -1930,6 +2013,7 @@ class _OpenAgentPluginSkillMixin:
         for key, value in getattr(plugin, "config_defaults", {}).items():
             if key not in self.config.keys():
                 self.config._values[key] = self._plugin_config_value(key, value)
+        self._refresh_live_config_schema()
         self._plugins[name] = plugin
         self._tool_map_cache = None  # invalidate after plugin list changes
         self.log.info(f"Plugin registered: {name} v{plugin.version}")
@@ -3040,8 +3124,9 @@ class _OpenAgentTelegramMediaMixin:
         await asyncio.sleep(0)
         chat = (chat or "").strip()
         if not chat or chat.lower() in {"current", "this", "here"}:
-            if source_event is not None and getattr(source_event, "chat_id", None) is not None:
-                return getattr(source_event, "chat_id")
+            chat_id = self._event_chat_id(source_event)
+            if chat_id is not None:
+                return chat_id
             return "me"
         try:
             return int(chat)
@@ -3102,6 +3187,7 @@ class _OpenAgentStatusMixin:
         tool_name: str = "",
         elapsed: float | None = None,
         thinking_notes: list[str] | None = None,
+        tool_done: bool = False,
     ) -> None:
         text = self._render_tool_display(
             title=title,
@@ -3110,6 +3196,7 @@ class _OpenAgentStatusMixin:
             log=log,
             elapsed=elapsed,
             thinking_notes=thinking_notes,
+            tool_done=tool_done,
         )
         try:
             buttons = getattr(event, "_openagent_status_buttons", None)
@@ -3440,7 +3527,7 @@ class _OpenAgentAgentLoopMixin:
         else:
             user_content = self._build_openai_content(prompt, attachments)
 
-        chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
+        chat_id = self._event_chat_id(source_event)
         compacted_context = await self._compact_chat_history_if_needed(chat_id, provider, api_key)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_override or self._system_prompt(prompt)}
@@ -4308,6 +4395,81 @@ class _OpenAgentResponseMixin:
         with contextlib.suppress(Exception):
             await event.answer(self.strings("runtime_comment_saved"), alert=False)
 
+    def add_runtime_comment(self, runtime_token: str | None, comment: str) -> bool:
+        """Queue a comment for the active agent loop identified by runtime_token."""
+        token = str(runtime_token or "").strip()
+        text = str(comment or "").strip()
+        if not token or not text:
+            return False
+        bucket = self._runtime_comments.setdefault(token, [])
+        bucket.append(text[:4000])
+        if len(bucket) > 10:
+            del bucket[:-10]
+        return True
+
+    def create_background_tool_task(
+        self,
+        *,
+        tool_name: str,
+        attrs_raw: str = "",
+        body: str = "",
+        source_event: Any | None = None,
+        status_event: Any | None = None,
+        runtime_token: str | None = None,
+        label: str = "",
+    ) -> str:
+        """Run a tool asynchronously and add a runtime comment when it finishes."""
+        clean_tool = str(tool_name or "").strip().lower()
+        if not clean_tool:
+            raise ValueError("tool_name is required")
+        if clean_tool in {"task.background", "task.run_background", "background.run"}:
+            raise ValueError("background task tools cannot run themselves")
+        task_id = uuid.uuid4().hex[:10]
+        display = (label or clean_tool).strip()[:120]
+        token = str(runtime_token or "").strip()
+
+        async def runner() -> None:
+            started = time.monotonic()
+            local_log: list[str] = []
+            local_thinking: list[str] = []
+            try:
+                result = await self._dispatch_tool(
+                    clean_tool,
+                    attrs_raw,
+                    body,
+                    source_event,
+                    status_event,
+                    local_log,
+                    started_at=started,
+                    thinking_notes=local_thinking,
+                )
+                elapsed = time.monotonic() - started
+                comment = (
+                    f"Background task {task_id} finished: {display}\n"
+                    f"tool: {clean_tool}\n"
+                    f"elapsed: {elapsed:.1f}s\n"
+                    f"result:\n{str(result or '').strip()[:3000]}"
+                )
+                if not self.add_runtime_comment(token, comment):
+                    self.log.info("OpenAgent background task %s finished: %s", task_id, clean_tool)
+            except Exception as exc:
+                elapsed = time.monotonic() - started
+                comment = (
+                    f"Background task {task_id} failed: {display}\n"
+                    f"tool: {clean_tool}\n"
+                    f"elapsed: {elapsed:.1f}s\n"
+                    f"error: {type(exc).__name__}: {exc}"
+                )
+                self.add_runtime_comment(token, comment)
+                with contextlib.suppress(Exception):
+                    await self.kernel.handle_error(exc, source=f"OpenAgent:bg_tool:{clean_tool}", event=source_event)
+            finally:
+                self._background_tool_tasks.pop(task_id, None)
+
+        task = asyncio.create_task(runner())
+        self._background_tool_tasks[task_id] = task
+        return task_id
+
     def _runtime_control_buttons(self, token: str, source_event: Any | None = None) -> list[list[Any]]:
         """Buttons shown while a generation is running."""
         allow_user = getattr(source_event, "sender_id", None)
@@ -4856,7 +5018,7 @@ class _OpenAgentToolRegistryMixin:
                 data = io.BytesIO(content.encode("utf-8"))
                 data.name = filename
                 await self.client.send_file(
-                    getattr(source_event, "chat_id", None) or source_event,
+                    self._event_chat_id(source_event) or source_event,
                     data,
                     caption=f"Generated file: {filename}",
                 )
@@ -4878,7 +5040,7 @@ class _OpenAgentToolRegistryMixin:
 
     async def _prune_context_tool(self, attrs_raw: str, body: str, source_event: Any | None) -> str:
         attrs = self._parse_xml_attrs(attrs_raw)
-        chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
+        chat_id = self._event_chat_id(source_event)
         target_raw = attrs.get("target") or attrs.get("targets") or body.strip() or "all"
         targets = {
             item.strip().lower()
@@ -4934,7 +5096,7 @@ class _OpenAgentToolRegistryMixin:
         return "Context prune complete: " + ("; ".join(changed) if changed else "nothing matched")
 
     async def _context_registry_tool(self, tool_name: str, attrs_raw: str, body: str, source_event: Any | None) -> str:
-        chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
+        chat_id = self._event_chat_id(source_event)
         if tool_name in {"context.prune", "context.discard"}:
             return await self._prune_context_tool(attrs_raw, body, source_event)
         if tool_name == "context.clear":
@@ -5306,6 +5468,11 @@ class _OpenAgentToolRegistryMixin:
             if "attrs_raw" in params: kwargs["attrs_raw"] = attrs_raw
             if "body" in params: kwargs["body"] = body
             if "source_event" in params: kwargs["source_event"] = source_event
+            if "status_event" in params: kwargs["status_event"] = status_event
+            if "agent_log" in params: kwargs["agent_log"] = agent_log
+            if "started_at" in params: kwargs["started_at"] = started_at
+            if "thinking_notes" in params: kwargs["thinking_notes"] = thinking_notes
+            if "runtime_token" in params: kwargs["runtime_token"] = self._placeholder_context.get("cancel_token")
             if "kind" in params:
                 kwargs["kind"] = "group" if name.endswith("group") else "channel"
             if "command" in params: kwargs["command"] = body.strip() # for _run_terminal
@@ -5340,16 +5507,17 @@ class _OpenAgentToolRegistryMixin:
             else:
                 result = await handler_method(**kwargs)
 
-            if status_event and name.startswith("todo."):
+            if status_event:
                 elapsed = time.monotonic() - started_at if started_at is not None else None
                 await self._show_agent_action(
                     status_event,
-                    f"Updated {name}",
+                    f"Updated {name}" if name.startswith("todo.") else f"Completed {name}",
                     result,
                     agent_log,
                     tool_name=name,
                     elapsed=elapsed,
                     thinking_notes=thinking_notes,
+                    tool_done=True,
                 )
             return result
         except Exception as e:
@@ -5380,7 +5548,7 @@ class OpenAgent(
     ModuleBase,
 ):
     name = "OpenAgent"
-    version = "0.8.0-dev.build:1020"
+    version = "0.8.0-dev.build:1040"
     author = "@dev_dolbaeb && @Hairpin00"
     description = {
         "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",
@@ -6285,10 +6453,10 @@ class OpenAgent(
         ),
         ConfigValue(
             "tool_display_template",
-            "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
-            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General placeholders: " + PLACEHOLDER_KEYS,
+            "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
+            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_state}, {tool_state_emoji}, {tool_state_icon}, {tool_state_emoji_html}, {tool_state_icon_html}, {tool_running_emoji}, {tool_running_icon}, {tool_running_emoji_html}, {tool_running_icon_html}, {tool_done_emoji}, {tool_done_icon}, {tool_done_emoji_html}, {tool_done_icon_html}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General placeholders: " + PLACEHOLDER_KEYS,
             validator=String(
-                default="<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
+                default="<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
             ),
         ),
         ConfigValue(
@@ -6421,7 +6589,7 @@ class OpenAgent(
             self.raw_text = text
             self.message = self
             self.client = outer.client
-            self.chat_id = getattr(source_event, "chat_id", None)
+            self.chat_id = outer._event_chat_id(source_event)
             self.sender_id = getattr(outer.kernel, "ADMIN_ID", None) or getattr(
                 source_event, "sender_id", None
             )
