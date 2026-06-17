@@ -28,7 +28,7 @@ import importlib
 import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 from urllib.parse import quote, urlparse
 
 import aiohttp
@@ -75,6 +75,9 @@ from core.lib.loader.module_config import (
     String,
 )
 
+if TYPE_CHECKING:
+    from core.lib.types import InlineMessage, Event, Kernel
+
 
 @dataclass
 class OASession:
@@ -86,6 +89,7 @@ class OASession:
     updated_at: float
     messages: list[dict[str, str]] = field(default_factory=list)
     model: str | None = None
+    thinking_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -96,6 +100,7 @@ class OASession:
             "updated_at": self.updated_at,
             "messages": self.messages,
             "model": self.model,
+            "thinking_notes": self.thinking_notes,
         }
 
     @classmethod
@@ -108,6 +113,7 @@ class OASession:
             updated_at=float(d.get("updated_at", 0)),
             messages=list(d.get("messages") or []),
             model=str(d.get("model") or "") or None,
+            thinking_notes=[str(item) for item in (d.get("thinking_notes") or []) if str(item).strip()],
         )
 
 
@@ -125,6 +131,8 @@ class SessionManager:
     ) -> None:
         self.sessions_file = sessions_file
         self.sessions_file.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(Exception):
+            self.sessions_file.parent.chmod(0o700)
         self.log = logger
         self._model_getter = model_getter
         self._default_name_getter = default_name_getter
@@ -132,41 +140,136 @@ class SessionManager:
         self.sessions: dict[str, OASession] = {}
         self.active_session: dict[int, str] = {}
         self.session_prefs: dict[int, str] = {}
+        self._save_lock: asyncio.Lock | None = None
+
+    @property
+    def _backup_file(self) -> Path:
+        return self.sessions_file.with_suffix(self.sessions_file.suffix + ".bak")
+
+    def _chmod_private_file(self, path: Path) -> None:
+        with contextlib.suppress(Exception):
+            if path.exists():
+                path.chmod(0o600)
+
+    def _write_private_bytes(self, path: Path, data: bytes) -> None:
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "wb",
+                dir=str(path.parent),
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+                tmp.write(data)
+            tmp_path.chmod(0o600)
+            tmp_path.replace(path)
+            self._chmod_private_file(path)
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                with contextlib.suppress(Exception):
+                    tmp_path.unlink()
+
+    async def _load_payload(self) -> dict[str, Any] | None:
+        """Read sessions JSON, falling back to the last known-good backup."""
+        for path in (self.sessions_file, self._backup_file):
+            if not path.exists():
+                continue
+            self._chmod_private_file(path)
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    if path != self.sessions_file:
+                        self.log.warning("OpenAgent: restored sessions from backup")
+                    return payload
+            except Exception as exc:
+                self.log.warning(f"OpenAgent: failed to read sessions file {path}: {exc}")
+        return None
 
     async def load(self) -> None:
         """Load persisted sessions without replacing public dict objects."""
-        if not self.sessions_file.exists():
+        if not self.sessions_file.exists() and not self._backup_file.exists():
             return
         try:
-            data = json.loads(self.sessions_file.read_text(encoding="utf-8"))
+            data = await self._load_payload()
+            if not data:
+                return
             self.sessions.clear()
             self.active_session.clear()
             self.session_prefs.clear()
-            for raw in data.get("sessions", []):
-                session = OASession.from_dict(raw)
-                if session.id and session.chat_id:
-                    self.sessions[session.id] = session
-            for chat_id_str, session_id in data.get("active", {}).items():
-                cid = int(chat_id_str)
-                if session_id in self.sessions:
-                    self.active_session[cid] = session_id
-            for chat_id_str, pref in data.get("prefs", {}).items():
-                if pref in {"ask", "continue", "new"}:
-                    self.session_prefs[int(chat_id_str)] = pref
+            raw_sessions = data.get("sessions", [])
+            if not isinstance(raw_sessions, list):
+                raw_sessions = []
+            raw_active = data.get("active", {})
+            if not isinstance(raw_active, dict):
+                raw_active = {}
+            raw_prefs = data.get("prefs", {})
+            if not isinstance(raw_prefs, dict):
+                raw_prefs = {}
+            for raw in raw_sessions:
+                with contextlib.suppress(Exception):
+                    session = OASession.from_dict(raw)
+                    if session.id and session.chat_id:
+                        self.sessions[session.id] = session
+            for chat_id_str, session_id in raw_active.items():
+                with contextlib.suppress(Exception):
+                    cid = int(chat_id_str)
+                    if session_id in self.sessions:
+                        self.active_session[cid] = session_id
+            for chat_id_str, pref in raw_prefs.items():
+                with contextlib.suppress(Exception):
+                    if pref in {"ask", "continue", "new"}:
+                        self.session_prefs[int(chat_id_str)] = pref
+            repaired = False
+            for session in sorted(self.sessions.values(), key=lambda item: item.updated_at, reverse=True):
+                if session.chat_id and session.chat_id not in self.active_session:
+                    self.active_session[session.chat_id] = session.id
+                    repaired = True
+            if repaired:
+                await self.save()
         except Exception as exc:
             self.log.warning(f"OpenAgent: failed to load sessions: {exc}")
 
     async def save(self) -> None:
         """Persist sessions to disk."""
+        if self._save_lock is None:
+            self._save_lock = asyncio.Lock()
         try:
-            data = {
-                "sessions": [s.to_dict() for s in self.sessions.values()],
-                "active": {str(k): v for k, v in self.active_session.items()},
-                "prefs": {str(k): v for k, v in self.session_prefs.items()},
-            }
-            self.sessions_file.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            async with self._save_lock:
+                data = {
+                    "sessions": [s.to_dict() for s in self.sessions.values()],
+                    "active": {str(k): v for k, v in self.active_session.items()},
+                    "prefs": {str(k): v for k, v in self.session_prefs.items()},
+                }
+                tmp_path: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        "w",
+                        encoding="utf-8",
+                        dir=str(self.sessions_file.parent),
+                        prefix=f".{self.sessions_file.name}.",
+                        suffix=".tmp",
+                        delete=False,
+                    ) as tmp:
+                        tmp_path = Path(tmp.name)
+                        json.dump(data, tmp, ensure_ascii=False, indent=2)
+                        tmp.write("\n")
+                    if self.sessions_file.exists():
+                        current_payload = self.sessions_file.read_bytes()
+                        try:
+                            json.loads(current_payload.decode("utf-8"))
+                        except Exception:
+                            self.log.warning("OpenAgent: current sessions file is invalid, keeping previous backup")
+                        else:
+                            self._write_private_bytes(self._backup_file, current_payload)
+                            self._chmod_private_file(self._backup_file)
+                    tmp_path.replace(self.sessions_file)
+                    self._chmod_private_file(self.sessions_file)
+                finally:
+                    if tmp_path is not None and tmp_path.exists():
+                        with contextlib.suppress(Exception):
+                            tmp_path.unlink()
         except Exception as exc:
             self.log.warning(f"OpenAgent: failed to save sessions: {exc}")
 
@@ -202,7 +305,20 @@ class SessionManager:
         session_id = self.active_session.get(chat_id)
         if session_id and session_id in self.sessions:
             return self.sessions[session_id]
+        existing = self.get_chat_sessions(chat_id)
+        if existing:
+            session = existing[0]
+            self.active_session[chat_id] = session.id
+            self.schedule_save()
+            return session
         return self.new_session(chat_id)
+
+    def get_fresh_session(self, chat_id: int, name: str | None = None) -> OASession:
+        """Return an empty active session, or create a new one if current has history."""
+        session = self.get_active_session(chat_id)
+        if not session.messages:
+            return session
+        return self.new_session(chat_id, name)
 
     def get_chat_sessions(self, chat_id: int) -> list[OASession]:
         """Return all sessions for a chat, sorted newest-first."""
@@ -248,6 +364,8 @@ class OpenAgentPlugin:
 
     def __init__(self, agent: "OpenAgent") -> None:
         self._agent = agent
+        self.kernel: Kernel = self._agent.kernel
+        self.client = self._agent.client
 
     @property
     def agent(self) -> "OpenAgent":
@@ -279,6 +397,7 @@ class _OpenAgentLifecycleMixin:
             "max_tokens": 1200,
             "reasoning_effort": "off",
             "timeout": 180,
+            "provider_reconnect_attempts": 5,
             "terminal_enabled": True,
             "terminal_steps": 3,
             "terminal_timeout": 30,
@@ -366,7 +485,11 @@ class _OpenAgentLifecycleMixin:
         self._input_events: dict[str, dict[str, Any]] = {}
         self._session_input_events: dict[str, dict[str, Any]] = {}
         self._pending_prompts: dict[str, dict[str, Any]] = {}
+        self._runtime_comments: dict[str, list[str]] = {}
         self._inline_status_waiters: dict[str, asyncio.Future[Any]] = {}
+        # Per-chat reference to the last inline response form so follow-up
+        # Button.input edits it in place instead of posting a new message.
+        self._oa_last_loading: dict[int, Any] = {}
         self._tool_confirmation_waiters: dict[str, asyncio.Future[bool]] = {}
         self._last_token_usage = {
             "input_tokens": 0,
@@ -456,11 +579,40 @@ class _OpenAgentProviderMixin:
             raw_random = raw_random.splitlines()
         random_lines = [str(line).strip() for line in raw_random if str(line).strip()]
         random_value = random.choice(random_lines) if random_lines else "Thinking..."
+        ctx = getattr(self, "_placeholder_context", {})
+        ctx = ctx if isinstance(ctx, dict) else {}
+        chat_id = ctx.get("chat_id")
+        user_id = ctx.get("user_id")
+        cancel_token = ctx.get("cancel_token")
+        session_name = ""
+        session_messages = "0"
+        if chat_id is not None:
+            with contextlib.suppress(Exception):
+                cid = int(chat_id)
+                active_id = getattr(self, "_active_session", {}).get(cid)
+                session = getattr(self, "_sessions", {}).get(active_id) if active_id else None
+                if session is None:
+                    sessions = [
+                        item for item in getattr(self, "_sessions", {}).values()
+                        if getattr(item, "chat_id", None) == cid
+                    ]
+                    session = max(sessions, key=lambda item: getattr(item, "updated_at", 0), default=None)
+                if session is not None:
+                    session_name = str(session.name or "")
+                    session_messages = str(len(session.messages or []))
+        runtime_comments = list(getattr(self, "_runtime_comments", {}).get(str(cancel_token), [])) if cancel_token else []
         values = {
+            "agent_version": str(getattr(self, "version", "")),
             "provider": self._provider_label(),
             "provider_key": self._provider(),
             "model": self._model(),
             "reasoning_effort": self._reasoning_effort(),
+            "chat_id": str(chat_id or ""),
+            "user_id": str(user_id or ""),
+            "session_name": session_name,
+            "session_messages": session_messages,
+            "runtime_comments_count": str(len(runtime_comments)),
+            "runtime_comments": "\n".join(str(item) for item in runtime_comments[-3:]),
             "tool_count": str(tool_count if tool_count is not None else 0),
             "available_tool_count": str(len(self._effective_tool_registry())),
             "elapsed": f"{elapsed:.1f}" if elapsed is not None else "0.0",
@@ -477,6 +629,18 @@ class _OpenAgentProviderMixin:
         for key, value in self.PREMIUM_EMOJIS.items():
             values[f"emoji_{key}"] = value
         return values
+
+    def _set_placeholder_context(self, event: Any | None = None, cancel_token: str | None = None) -> None:
+        chat_id = None
+        user_id = None
+        if event is not None:
+            chat_id = getattr(event, "chat_id", None) or getattr(event, "_openagent_source_chat_id", None)
+            user_id = getattr(event, "sender_id", None) or getattr(event, "user_id", None)
+        self._placeholder_context = {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "cancel_token": cancel_token,
+        }
 
     def _render_template(
         self,
@@ -502,11 +666,32 @@ class _OpenAgentProviderMixin:
         )
 
     def _format_placeholders(self) -> str:
-        return "\n".join(
-            [
-                ""
-            ]
-        )
+        descriptions = {
+            "agent_version": "OpenAgent version",
+            "provider": "Provider label",
+            "provider_key": "Provider key",
+            "model": "Current model",
+            "reasoning_effort": "Reasoning effort",
+            "chat_id": "Current chat id",
+            "user_id": "Current user id",
+            "session_name": "Active OpenAgent session name",
+            "session_messages": "Active session message count",
+            "runtime_comments_count": "Queued live comments count",
+            "runtime_comments": "Last 3 queued live comments",
+            "tool_count": "Tools used in current response",
+            "available_tool_count": "Available tool count",
+            "elapsed": "Elapsed seconds",
+            "input_tokens": "Last input tokens",
+            "output_tokens": "Last output tokens",
+            "total_tokens": "Last total tokens",
+            "thinking": "Thinking notes text",
+            "todo": "Formatted TODO list",
+            "random": "Random thinking string",
+            "prefix": "Command prefix",
+            "time": "Current time",
+            "date": "Current date",
+        }
+        return "\n".join(f"{{{key}}} - {value}" for key, value in descriptions.items())
 
 
 class _OpenAgentTodoMixin:
@@ -700,6 +885,7 @@ class _OpenAgentToolDisplayMixin:
             "context": "🧾",
             "todo": "📝",
             "utility": "🛠",
+            "reconnect": self._emoji("reconnect", "🔄"),
         }.get(group, "🛠")
 
     def _tool_status_text(self, tool_name: str, title: str) -> str:
@@ -707,6 +893,8 @@ class _OpenAgentToolDisplayMixin:
         group = self._tool_group(tool_name)
         if tool_name == "thinking.note":
             return self.strings("status_thinking")
+        if group == "reconnect":
+            return title or "Reconnect"
         status_key = {
             "terminal": "status_terminal",
             "web": "status_web",
@@ -801,7 +989,7 @@ class _OpenAgentToolDisplayMixin:
         elapsed: float | None = None,
         thinking_notes: list[str] | None = None,
     ) -> str:
-        max_chars = int(self.config.get("tool_display_max_chars", 1200) or 1200)
+        max_chars = int(self.config.get("tool_display_max_chars", 30) or 30)
         log_lines = int(self.config.get("tool_display_log_lines", 8) or 8)
         safe_value = value if len(value) <= max_chars else value[:max_chars] + "..."
         log_text = "\n".join(log[-log_lines:]) if log_lines > 0 else ""
@@ -891,6 +1079,7 @@ class _OpenAgentContextMixin:
         prompt: str,
         answer: str,
         tool_trace: list[dict[str, str]] | None = None,
+        thinking_notes: list[str] | None = None,
     ) -> None:
         if not chat_id or not self.config["context_enabled"]:
             return
@@ -903,10 +1092,12 @@ class _OpenAgentContextMixin:
                 role = "assistant"
             entries.append(self._history_message(role, item.get("content", "")))
         entries.append(self._history_message("assistant", answer, limit=8000))
+        session.thinking_notes = [str(item).strip() for item in (thinking_notes or []) if str(item).strip()]
         history.extend(entries)
         context_turns = int(self.config["context_turns"])
         if context_turns <= 0:
             history.clear()
+            session.thinking_notes = []
         elif history and history[0].get("role") == "system" and str(history[0].get("content", "")).startswith("Compacted previous OpenAgent session context:"):
             max_messages = max(context_turns * 4, len(entries))
             keep_tail = max(0, max_messages - 1)
@@ -1054,7 +1245,7 @@ class _OpenAgentContextMixin:
             return str(self.config.get("custom_base_url", "") or "").strip().rstrip("/")
         return self.BASE_URLS[provider].rstrip("/")
 
-    def _args_raw(self, event: events.NewMessage.Event) -> str:
+    def _args_raw(self, event: Event) -> str:
         return self.args_raw(event).strip()
 
     async def _set_config_value(self, key: str, value: Any) -> None:
@@ -1079,6 +1270,10 @@ class _OpenAgentSessionsMixin:
     def _new_session(self, chat_id: int, name: str | None = None) -> OASession:
         """Create a fresh session and make it active for chat_id."""
         return self.session_manager.new_session(chat_id, name)
+
+    def _fresh_session(self, chat_id: int, name: str | None = None) -> OASession:
+        """Reuse current empty chat; otherwise create a fresh session."""
+        return self.session_manager.get_fresh_session(chat_id, name)
 
     def _get_active_session(self, chat_id: int) -> OASession:
         """Return active session for chat_id, creating one if needed."""
@@ -1227,6 +1422,26 @@ class _OpenAgentSessionsMixin:
                 lines.append(f"{marker} <b>{name}</b>     <i>{html.escape(self.strings('chat_empty'))}</i>")
         return "\n".join(lines)
 
+    def _last_saved_assistant_turn(self, chat_id: int) -> tuple[str, str, list[str]] | None:
+        """Return (prompt, answer, thinking_notes) from the active session history."""
+        session = self._get_active_session(chat_id)
+        messages = session.messages or []
+        for index in range(len(messages) - 1, -1, -1):
+            item = messages[index]
+            if item.get("role") != "assistant":
+                continue
+            answer = str(item.get("content") or "").strip()
+            if not answer:
+                continue
+            prompt = ""
+            for prev in range(index - 1, -1, -1):
+                prev_item = messages[prev]
+                if prev_item.get("role") == "user":
+                    prompt = str(prev_item.get("content") or "").strip()
+                    break
+            return prompt, answer, list(getattr(session, "thinking_notes", []) or [])
+        return None
+
     def _sessions_panel_buttons(self, chat_id: int, source_event: Any | None = None) -> list[list[Any]]:
         rows: list[list[Any]] = []
         allow_user = getattr(source_event, "sender_id", None)
@@ -1244,6 +1459,25 @@ class _OpenAgentSessionsMixin:
                 data=self._make_session_input_token(chat_id, "new", source_event),
             )
         ])
+        rows.append([
+            self.Button.input(
+                self.strings("ask_this_chat_button"),
+                self._on_ask_this_session_input,
+                placeholder=self.strings("ask_this_chat_placeholder"),
+                allow_user=allow_user,
+                style="primary",
+                data=self._make_session_input_token(chat_id, "ask", source_event),
+            )
+        ])
+        if self._last_saved_assistant_turn(int(chat_id)) is not None:
+            rows.append([
+                self.Button.inline(
+                    self.strings("return_to_chat_button"),
+                    self._return_to_last_response,
+                    args=(chat_id,),
+                    style="primary",
+                )
+            ])
         rows.append([
             self.Button.input(
                 self.strings("rename_chat_button"),
@@ -1354,12 +1588,29 @@ class _OpenAgentSessionsMixin:
         panel_event = entry.get("event") or event
         await self._show_sessions_panel(panel_event, chat_id, alert=self.strings("chat_renamed", name=session.name))
 
+    async def _on_ask_this_session_input(self, event: Any, text: str, data: str) -> None:
+        entry = self._session_input_events.pop(data, None)
+        prompt = (text or "").strip()
+        if not entry or not prompt:
+            return
+        chat_id = int(entry["chat_id"])
+        source_event = entry.get("event") or event
+        prompt_token = self._store_pending_prompt(
+            chat_id,
+            prompt,
+            prompt,
+            [],
+            source_event=source_event,
+        )
+        await self._execute_pending(event, prompt_token)
+
     def _store_pending_prompt(
         self,
         chat_id: int,
         prompt: str,
         full_prompt: str,
         attachments: list[dict[str, str]],
+        source_event: Any | None = None,
     ) -> str:
         token = str(uuid.uuid4())
         self._pending_prompts[token] = {
@@ -1367,6 +1618,7 @@ class _OpenAgentSessionsMixin:
             "prompt": prompt,
             "full_prompt": full_prompt,
             "attachments": attachments,
+            "source_event": source_event,
             "created_at": time.time(),
         }
         if len(self._pending_prompts) > 30:
@@ -1471,28 +1723,32 @@ class _OpenAgentSessionsMixin:
         full_prompt = entry["full_prompt"]
         attachments = entry.get("attachments") or []
         chat_id = entry.get("chat_id") or getattr(event, "chat_id", None)
+        source_event = entry.get("source_event") or event
+        status_event = event
+        if getattr(status_event, "chat_id", None) is None and not hasattr(status_event, "edit"):
+            status_event = source_event
         cancel_token = str(uuid.uuid4())
-        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
+        self._set_placeholder_context(source_event, cancel_token)
         loading = await self._start_inline_status(
-            event,
+            status_event,
             self._thinking_text(),
-            [[cancel_button]],
+            self._runtime_control_buttons(cancel_token, source_event),
         )
         started = time.monotonic()
         try:
             answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
                 full_prompt,
                 status_event=loading or event,
-                source_event=event,
+                source_event=source_event,
                 attachments=attachments,
                 cancel_token=cancel_token,
                 started_at=started,
             )
             self._last_request_at = time.time()
             elapsed = time.monotonic() - started
-            self._remember_context(chat_id, full_prompt, answer, tool_trace)
+            self._remember_context(chat_id, full_prompt, answer, tool_trace, thinking_notes)
             await self._reply_text(
-                loading or event,
+                loading or status_event,
                 answer,
                 title=self._response_title(
                     elapsed,
@@ -1507,20 +1763,25 @@ class _OpenAgentSessionsMixin:
                     prompt,
                     full_prompt,
                     attachments,
-                    source_event=loading or event,
+                    source_event=source_event,
                 ),
                 edit_current=True,
             )
-            self._cancelled_generations.discard(cancel_token)
+            self._store_last_loading(chat_id, loading)
+            self._cleanup_runtime_run(cancel_token)
         except Exception as exc:
-            self._cancelled_generations.discard(cancel_token)
-            await self.kernel.handle_error(exc, source="OpenAgent:pending", event=event)
-            with contextlib.suppress(Exception):
-                await self.edit(
-                    loading or event,
-                    html.escape(self.strings("error", error=str(exc))),
-                    as_html=True,
-                )
+            self._cleanup_runtime_run(cancel_token)
+            await self._reply_error_answer(
+                loading or status_event,
+                exc,
+                prompt=prompt,
+                full_prompt=full_prompt,
+                attachments=attachments,
+                source_event=source_event,
+                chat_id=chat_id,
+                started_at=started,
+                source="OpenAgent:pending",
+            )
 
 
 
@@ -1752,6 +2013,8 @@ class _OpenAgentPluginSkillMixin:
             "code.read_docs": {"desc": "Read bundled/remote MCUB API documentation."},
             "context.remember": {"desc": "Remember a note in the active chat context.", "body": "memory note"},
             "context.clear": {"desc": "Clear the active OpenAgent session context."},
+            "context.prune": {"desc": "Prune internal OpenAgent context: history, tools, tool_memory, runtime_comments, or all.", "args": "target/all; keep", "body": "optional target list"},
+            "context.discard": {"desc": "Alias for context.prune." , "args": "target/all; keep", "body": "optional target list"},
             "context.regenerate": {"desc": "Explain that regeneration is available via the response button."},
             "context.reply_context": {"desc": "Read context from the replied message."},
             "context.media_context": {"desc": "Read replied media/message context."},
@@ -1892,7 +2155,7 @@ class _OpenAgentPluginSkillMixin:
             raise
         return next((pname for pname, path in self._plugin_files.items() if path == fpath), safe_name)
 
-    async def _install_plugin_from_reply(self, event: events.NewMessage.Event) -> str:
+    async def _install_plugin_from_reply(self, event: Event) -> str:
         reply = await event.get_reply_message()
         if not reply:
             raise ValueError("Reply to a .py plugin file or Python plugin code")
@@ -2290,15 +2553,40 @@ class _OpenAgentRuntimeToolsMixin:
 
     def _thinking_system_prompt(self) -> str:
         base = str(self.config["system_prompt"]).strip()
+        effort = self._reasoning_effort()
+        profiles = {
+            "off": (
+                "Default to SKIP. Use thinking.note only for clearly multi-step tasks or risky actions. "
+                "Limit: 60 chars."
+            ),
+            "low": (
+                "Use thinking.note only for the most necessary progress notes. "
+                "No meta chatter. Limit: 80 chars."
+            ),
+            "medium": (
+                "Use thinking.note for useful planning, findings, risks, or next steps. "
+                "Limit: 180 chars."
+            ),
+            "high": (
+                "Use richer thinking.note entries for complex debugging/refactoring: current hypothesis, evidence, risk, or next action. "
+                "Limit: 360 chars."
+            ),
+            "xhigh": (
+                "Use detailed but user-facing thinking.note entries for hard multi-step work, similar to a compact DeepSeek-style work log. "
+                "Include hypothesis/evidence/next action when useful. Limit: 700 chars."
+            ),
+        }
+        profile = profiles.get(effort, profiles["off"])
         return (
             f"{base}\n\n"
-            "Your ONLY task right now: output exactly one ```tool_call``` block using thinking.note.\n"
-            "The note must be one concise user-facing sentence (max 180 chars).\n"
-            "Say what you understood from the request and the immediate next step.\n"
+            f"Your ONLY task right now: decide whether a progress note is useful. Current reasoning_effort={effort}.\n"
+            f"Thinking note policy: {profile}\n"
+            "For simple chat, greetings, or short answers, output only: SKIP\n"
+            "When using thinking.note, write any note you find useful: thought, plan, finding, risk, or next action. Follow the profile limit above.\n"
             "Do NOT write a generic heartbeat. Do NOT put any tool call JSON inside the note text.\n\n"
-            "Output ONLY this, nothing else:\n"
+            "If useful, output only this shape:\n"
             "```tool_call\n"
-            "{\"tool\":\"thinking.note\",\"args\":{\"note\":\"Understood: <brief summary>. Next: <next step>.\"}}\n"
+            "{\"tool\":\"thinking.note\",\"args\":{\"note\":\"<your own short note>\"}}\n"
             "```"
         )
 
@@ -2568,7 +2856,7 @@ class _OpenAgentTelegramMediaMixin:
             return dst.read_bytes()
 
     async def _reply_context(
-        self, event: events.NewMessage.Event
+        self, event: Event
     ) -> tuple[str, list[dict[str, str]]]:
         reply = await event.get_reply_message()
         if not reply:
@@ -3011,7 +3299,7 @@ class _OpenAgentStatusMixin:
                     setattr(candidate, "_openagent_source_chat_id", getattr(event, "chat_id", None))
             return result or target_event
 
-        chat_id = getattr(event, "chat_id", None)
+        chat_id = getattr(event, "chat_id", None) or getattr(event, "_openagent_source_chat_id", None)
         target = await self._inline_target(event, chat_id)
         if not target:
             return await edit_with_status_buttons(event)
@@ -3062,6 +3350,75 @@ class _OpenAgentStatusMixin:
 class _OpenAgentAgentLoopMixin:
     """Agent loop, tool-call parsing and provider HTTP calls."""
 
+    def _is_provider_timeout_error(self, exc: BaseException) -> bool:
+        text = str(exc).lower()
+        return isinstance(exc, (TimeoutError, asyncio.TimeoutError)) or "timed out" in text or "timeout" in text
+
+    async def _ask_provider_once(
+        self,
+        provider: str,
+        messages: list[dict[str, Any]],
+        api_key: str,
+        *,
+        max_tokens_override: int | None = None,
+    ) -> str:
+        if provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other"):
+            return await self._ask_openai_compatible(
+                provider,
+                messages,
+                api_key,
+                max_tokens_override=max_tokens_override,
+            )
+        if provider == "google":
+            return await self._ask_google(
+                messages,
+                api_key,
+                max_tokens_override=max_tokens_override,
+            )
+        raise RuntimeError(self.strings("bad_provider", providers=", ".join(self.PROVIDERS)))
+
+    async def _ask_provider_with_reconnect(
+        self,
+        provider: str,
+        messages: list[dict[str, Any]],
+        api_key: str,
+        *,
+        status_event: Any | None = None,
+        agent_log: list[str] | None = None,
+        started_at: float | None = None,
+        thinking_notes: list[str] | None = None,
+        max_tokens_override: int | None = None,
+    ) -> str:
+        max_reconnects = max(0, min(int(self.config.get("provider_reconnect_attempts", 5) or 0), 5))
+        attempt = 0
+        while True:
+            try:
+                return await self._ask_provider_once(
+                    provider,
+                    messages,
+                    api_key,
+                    max_tokens_override=max_tokens_override,
+                )
+            except Exception as exc:
+                if not self._is_provider_timeout_error(exc) or attempt >= max_reconnects:
+                    raise
+                attempt += 1
+                reconnect_label = f"provider.reconnect {attempt}/{max_reconnects}"
+                if agent_log is not None:
+                    agent_log.append(reconnect_label)
+                if status_event is not None:
+                    with contextlib.suppress(Exception):
+                        await self._show_agent_action(
+                            status_event,
+                            f"Reconnect {attempt}/{max_reconnects}",
+                            str(exc),
+                            agent_log or [reconnect_label],
+                            tool_name="reconnect",
+                            elapsed=(time.monotonic() - started_at) if started_at else None,
+                            thinking_notes=thinking_notes,
+                        )
+                await asyncio.sleep(1)
+
     async def _ask_agent(
         self,
         prompt: str,
@@ -3110,21 +3467,21 @@ class _OpenAgentAgentLoopMixin:
         ]
         think_messages.extend(self._history_for_chat(chat_id))
         think_messages.append({"role": "user", "content": user_content})
-        if provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other"):
-            think_answer = await self._ask_openai_compatible(provider, think_messages, api_key)
-        elif provider == "google":
-            think_answer = await self._ask_google(think_messages, api_key)
-        else:
-            raise RuntimeError(self.strings("bad_provider", providers=", ".join(self.PROVIDERS)))
+        think_answer = await self._ask_provider_with_reconnect(
+            provider,
+            think_messages,
+            api_key,
+            status_event=status_event,
+            agent_log=agent_log,
+            started_at=started_at,
+            thinking_notes=thinking_notes,
+        )
 
         think_calls = [
             call
             for call in self._extract_tool_calls(think_answer or "")
             if (call[0] or "").lower().strip() == "thinking.note"
         ]
-        if not think_calls:
-            fallback_note = re.sub(r"```.*?```", " ", think_answer or "", flags=re.DOTALL).strip()
-            think_calls = [("thinking.note", "", fallback_note or self.strings("fallback_thinking_note"))]
         thinking_outputs: list[str] = []
         for tool_name, attrs_raw, body in think_calls[:1]:
             if cancel_token and cancel_token in self._cancelled_generations:
@@ -3146,14 +3503,14 @@ class _OpenAgentAgentLoopMixin:
                 f"body: {body or '-'}\n"
                 f"output:\n{output}"
             )
-        think_assistant_msg = {"role": "assistant", "content": think_answer or ""}
-        think_output_msg = {
-            "role": "user",
-            "content": "\n\n".join(thinking_outputs) + "\n\nNow proceed with the actual task.",
-        }
-        messages.append(think_assistant_msg)
-        messages.append(think_output_msg)
         if thinking_outputs:
+            think_assistant_msg = {"role": "assistant", "content": think_answer or ""}
+            think_output_msg = {
+                "role": "user",
+                "content": "\n\n".join(thinking_outputs) + "\n\nNow proceed with the actual task.",
+            }
+            messages.append(think_assistant_msg)
+            messages.append(think_output_msg)
             tool_trace.append(
                 {
                     "role": "assistant",
@@ -3164,13 +3521,20 @@ class _OpenAgentAgentLoopMixin:
         for _ in range(max_steps):
             if cancel_token and cancel_token in self._cancelled_generations:
                 raise RuntimeError("Generation cancelled")
+            runtime_comment = self._runtime_comment_message(cancel_token)
+            if runtime_comment:
+                messages.append(runtime_comment)
+                agent_log.append("user.comment")
 
-            if provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other"):
-                answer = await self._ask_openai_compatible(provider, messages, api_key)
-            elif provider == "google":
-                answer = await self._ask_google(messages, api_key)
-            else:
-                raise RuntimeError(self.strings("bad_provider", providers=", ".join(self.PROVIDERS)))
+            answer = await self._ask_provider_with_reconnect(
+                provider,
+                messages,
+                api_key,
+                status_event=status_event,
+                agent_log=agent_log,
+                started_at=started_at,
+                thinking_notes=thinking_notes,
+            )
 
             tool_calls = self._extract_tool_calls(answer or "")
             if not tool_calls:
@@ -3190,6 +3554,12 @@ class _OpenAgentAgentLoopMixin:
                     )
                     continue
                 clean_answer = (answer or "").strip()
+                runtime_comment = self._runtime_comment_message(cancel_token)
+                if runtime_comment:
+                    messages.append({"role": "assistant", "content": answer or ""})
+                    messages.append(runtime_comment)
+                    agent_log.append("user.comment")
+                    continue
                 if clean_answer or not agent_log:
                     return clean_answer, agent_log, thinking_notes, tool_trace
                 break
@@ -3244,12 +3614,15 @@ class _OpenAgentAgentLoopMixin:
                 ),
             }
         )
-        if provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other"):
-            answer = await self._ask_openai_compatible(provider, messages, api_key)
-        elif provider == "google":
-            answer = await self._ask_google(messages, api_key)
-        else:
-            raise RuntimeError(self.strings("bad_provider", providers=", ".join(self.PROVIDERS)))
+        answer = await self._ask_provider_with_reconnect(
+            provider,
+            messages,
+            api_key,
+            status_event=status_event,
+            agent_log=agent_log,
+            started_at=started_at,
+            thinking_notes=thinking_notes,
+        )
         clean = (answer or "").strip()
         if not clean and provider in ("openai", "openrouter", "groq", "deepseek", "xai", "other") and self._uses_completion_tokens(provider):
             max_tokens = int(self.config["max_tokens"])
@@ -3263,10 +3636,14 @@ class _OpenAgentAgentLoopMixin:
                         ),
                     }
                 )
-                answer = await self._ask_openai_compatible(
+                answer = await self._ask_provider_with_reconnect(
                     provider,
                     messages,
                     api_key,
+                    status_event=status_event,
+                    agent_log=agent_log,
+                    started_at=started_at,
+                    thinking_notes=thinking_notes,
                     max_tokens_override=max(4096, max_tokens * 2),
                 )
                 clean = (answer or "").strip()
@@ -3791,7 +4168,7 @@ class _OpenAgentResponseMixin:
         response_label = self._response_label(thinking_notes=thinking_notes)
         agent_log_html = self._agent_log_html(agent_log or [])
         total_formatted_len = len(formatted) + len(formatted_prompt) + len(agent_log_html)
-        chat_id = getattr(event, "chat_id", None)
+        chat_id = getattr(event, "chat_id", None) or getattr(event, "_openagent_source_chat_id", None)
         if total_formatted_len > 3500:
             self.log.debug(
                 "OA reply_text TOO_LONG→FILE: chat_id=%s total_len=%d limit=3500",
@@ -3882,6 +4259,103 @@ class _OpenAgentResponseMixin:
         except Exception:
             pass
 
+    async def _reply_error_answer(
+        self,
+        event: Any,
+        exc: BaseException,
+        *,
+        prompt: str,
+        full_prompt: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+        source_event: Any | None = None,
+        chat_id: int | None = None,
+        started_at: float | None = None,
+        source: str = "OpenAgent",
+    ) -> None:
+        """Render an exception as the final OpenAgent answer instead of a raw edit."""
+        with contextlib.suppress(Exception):
+            await self.kernel.handle_error(exc, source=source, event=source_event or event)
+        elapsed = (time.monotonic() - started_at) if started_at else 0.0
+        error_text = self.strings("error", error=str(exc))
+        await self._reply_text(
+            event,
+            error_text,
+            title=self._response_title(elapsed, tool_count=0, thinking_notes=[]),
+            prompt=prompt,
+            agent_log=[f"error: {type(exc).__name__}"],
+            thinking_notes=[],
+            buttons=self._final_buttons(
+                chat_id,
+                prompt,
+                full_prompt or prompt,
+                attachments or [],
+                source_event=source_event or event,
+            ),
+            edit_current=True,
+        )
+
+    async def _on_runtime_comment_input(self, event: Any, text: str, token: str) -> None:
+        """Collect a user comment while an agent run is still active."""
+        token = str(token or "").strip()
+        comment = (text or "").strip()
+        if not token or not comment:
+            return
+        bucket = self._runtime_comments.setdefault(token, [])
+        bucket.append(comment[:4000])
+        # Keep memory bounded if a user sends many comments during a long run.
+        if len(bucket) > 10:
+            del bucket[:-10]
+        with contextlib.suppress(Exception):
+            await event.answer(self.strings("runtime_comment_saved"), alert=False)
+
+    def _runtime_control_buttons(self, token: str, source_event: Any | None = None) -> list[list[Any]]:
+        """Buttons shown while a generation is running."""
+        allow_user = getattr(source_event, "sender_id", None)
+        comment_button = self.Button.input(
+            self.strings("runtime_comment_button"),
+            self._on_runtime_comment_input,
+            placeholder=self.strings("runtime_comment_placeholder"),
+            allow_user=allow_user,
+            style="primary",
+            data=str(token),
+        )
+        cancel_button = self._direct_button(
+            self.strings("cancel_button"),
+            "cancel",
+            {"token": token},
+        )
+        return [[comment_button, cancel_button]]
+
+    def _drain_runtime_comments(self, token: str | None) -> list[str]:
+        if not token:
+            return []
+        return self._runtime_comments.pop(str(token), [])
+
+    def _runtime_comment_message(self, token: str | None) -> dict[str, str] | None:
+        comments = self._drain_runtime_comments(token)
+        if not comments:
+            return None
+        rendered = "\n".join(f"- {item}" for item in comments)
+        return {
+            "role": "user",
+            "content": self.strings("runtime_comment_note", comments=rendered),
+        }
+
+    def _cleanup_runtime_run(self, token: str | None) -> None:
+        if not token:
+            return
+        self._cancelled_generations.discard(str(token))
+        self._runtime_comments.pop(str(token), None)
+
+    def _store_last_loading(self, chat_id: int | None, loading: Any) -> None:
+        """Remember the inline form for this chat so the next follow-up can edit it in place."""
+        if not chat_id or not loading or not hasattr(loading, "edit"):
+            return
+        self._oa_last_loading[int(chat_id)] = loading
+        if len(self._oa_last_loading) > 500:
+            for old_key in list(self._oa_last_loading)[:100]:
+                self._oa_last_loading.pop(old_key, None)
+
     async def _clear_context(self, event: Any, chat_id: int | None) -> None:
         if chat_id is not None:
             self._get_active_session(int(chat_id)).messages.clear()
@@ -3915,8 +4389,16 @@ class _OpenAgentResponseMixin:
             "prompt": prompt,
             "full_prompt": full_prompt,
             "attachments": attachments,
+            "source_event": source_event,
             "created_at": time.time(),
         }
+        self.log.debug(
+            "OA final_buttons: regen_token=%s chat_id=%s source_event=%s attachments=%d",
+            regen_token,
+            chat_id,
+            type(source_event).__name__ if source_event is not None else None,
+            len(attachments or []),
+        )
         if len(self._regen_payloads) > 50:
             stale = sorted(
                 self._regen_payloads,
@@ -3956,7 +4438,15 @@ class _OpenAgentResponseMixin:
                 style="primary",
                 data=input_key,
             )
-            rows.append([input_btn])
+            regen_prompt_btn = self.Button.input(
+                self.strings("regen_prompt_button"),
+                self._on_regenerate_prompt_input,
+                placeholder=self.strings("regen_prompt_placeholder"),
+                allow_user=getattr(source_event, "sender_id", None),
+                style="primary",
+                data=regen_token,
+            )
+            rows.append([input_btn, regen_prompt_btn])
         rows.append([regen_button, clear_button, history_button])
         return rows
 
@@ -3972,12 +4462,36 @@ class _OpenAgentResponseMixin:
         prompt = text.strip()
 
         cancel_token = str(uuid.uuid4())
-        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
-        loading = await self._start_inline_status(
-            source_event,
-            self._thinking_text(),
-            [[cancel_button]],
-        )
+        self._set_placeholder_context(source_event, cancel_token)
+        buttons = self._runtime_control_buttons(cancel_token, source_event)
+        # Try to reuse the previous inline response form so the answer edits
+        # it in place instead of posting a new message for every follow-up.
+        prev_form = self._oa_last_loading.get(int(chat_id)) if chat_id else None
+        loading = source_event
+        if prev_form and hasattr(prev_form, "edit"):
+            try:
+                await prev_form.edit(
+                    self._thinking_text(),
+                    buttons=buttons,
+                    parse_mode="html",
+                )
+                loading = prev_form
+                with contextlib.suppress(Exception):
+                    setattr(loading, "_openagent_status_buttons", buttons)
+                with contextlib.suppress(Exception):
+                    setattr(loading, "_openagent_source_chat_id", chat_id)
+            except Exception:
+                loading = await self._start_inline_status(
+                    source_event,
+                    self._thinking_text(),
+                    buttons,
+                )
+        else:
+            loading = await self._start_inline_status(
+                source_event,
+                self._thinking_text(),
+                buttons,
+            )
         started = time.monotonic()
         try:
             answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
@@ -3990,7 +4504,7 @@ class _OpenAgentResponseMixin:
             )
             self._last_request_at = time.time()
             elapsed = time.monotonic() - started
-            self._remember_context(chat_id, prompt, answer, tool_trace)
+            self._remember_context(chat_id, prompt, answer, tool_trace, thinking_notes)
             await self._reply_text(
                 loading or source_event,
                 answer,
@@ -4011,16 +4525,149 @@ class _OpenAgentResponseMixin:
                 ),
                 edit_current=True,
             )
-            self._cancelled_generations.discard(cancel_token)
+            self._store_last_loading(chat_id, loading)
+            self._cleanup_runtime_run(cancel_token)
         except Exception as exc:
-            self._cancelled_generations.discard(cancel_token)
-            await self.kernel.handle_error(exc, source="OpenAgent:follow_up", event=source_event)
+            self._cleanup_runtime_run(cancel_token)
+            await self._reply_error_answer(
+                loading or source_event,
+                exc,
+                prompt=prompt,
+                full_prompt=prompt,
+                attachments=attachments,
+                source_event=source_event,
+                chat_id=chat_id,
+                started_at=started,
+                source="OpenAgent:follow_up",
+            )
+
+    async def _on_regenerate_prompt_input(self, event: Any, text: str, token: str) -> None:
+        """Regenerate the previous answer using a user-provided replacement prompt."""
+        # Button.input delivers UpdateBotInlineSend as event — it has no .chat_id / .edit().
+        # Extract source_event and chat_id from the payload first so that show_feedback
+        # and the loading-status setup both have a real message context to work with.
+        payload = self._regen_payloads.get(str(token))
+        prompt = (text or "").strip()
+        source_event = (payload.get("source_event") if payload else None) or event
+        chat_id = payload.get("chat_id") if payload else None
+
+        async def show_feedback(message: str) -> None:
+            escaped = html.escape(message)
+            if hasattr(source_event, "edit"):
+                with contextlib.suppress(Exception):
+                    await source_event.edit(f"<blockquote>{escaped}</blockquote>", parse_mode="html")
+                    self.log.debug("OA regen_prompt: feedback edit ok token=%s", token)
+                    return
             with contextlib.suppress(Exception):
-                await self.edit(
-                    loading or source_event,
-                    html.escape(self.strings("error", error=str(exc))),
-                    as_html=True,
+                await self.edit(source_event, escaped, as_html=True)
+                self.log.debug("OA regen_prompt: feedback fallback edit ok token=%s", token)
+
+        self.log.debug(
+            "OA regen_prompt: input token=%s payload=%s prompt_len=%d event=%s",
+            token,
+            bool(payload),
+            len(prompt),
+            type(event).__name__,
+        )
+        if not payload:
+            self.log.debug("OA regen_prompt: stale token=%s", token)
+            await show_feedback(self.strings("regen_stale"))
+            return
+        if not prompt:
+            self.log.debug("OA regen_prompt: empty prompt token=%s", token)
+            await show_feedback(self.strings("regen_prompt_placeholder"))
+            return
+
+        attachments = payload.get("attachments") or []
+        cancel_token = str(uuid.uuid4())
+        self._set_placeholder_context(source_event, cancel_token)
+        buttons = self._runtime_control_buttons(cancel_token, source_event)
+        loading = source_event
+        if hasattr(source_event, "edit"):
+            try:
+                edited = await source_event.edit(
+                    self._thinking_text(),
+                    buttons=buttons,
+                    parse_mode="html",
                 )
+                loading = edited if edited and not isinstance(edited, bool) else source_event
+                self.log.debug(
+                    "OA regen_prompt: status edit ok token=%s loading=%s",
+                    token,
+                    type(loading).__name__,
+                )
+                with contextlib.suppress(Exception):
+                    setattr(loading, "_openagent_status_buttons", buttons)
+                with contextlib.suppress(Exception):
+                    setattr(loading, "_openagent_source_chat_id", chat_id)
+            except Exception as exc:
+                self.log.debug("OA regen_prompt: status edit failed token=%s error=%s", token, exc)
+                loading = await self._start_inline_status(source_event, self._thinking_text(), buttons)
+        else:
+            self.log.debug("OA regen_prompt: no source_event.edit token=%s, using inline status", token)
+            loading = await self._start_inline_status(source_event, self._thinking_text(), buttons)
+
+        started = time.monotonic()
+        try:
+            self.log.debug(
+                "OA regen_prompt: ask start token=%s chat_id=%s prompt_len=%d source_event=%s",
+                token,
+                chat_id,
+                len(prompt),
+                type(source_event).__name__ if source_event is not None else None,
+            )
+            answer, agent_log, thinking_notes, tool_trace = await self._ask_agent(
+                prompt,
+                status_event=loading or source_event,
+                source_event=source_event,
+                attachments=attachments,
+                cancel_token=cancel_token,
+                started_at=started,
+            )
+            elapsed = time.monotonic() - started
+            self.log.debug(
+                "OA regen_prompt: ask done token=%s elapsed=%.2f tools=%d answer_len=%d",
+                token,
+                elapsed,
+                len(agent_log),
+                len(answer or ""),
+            )
+            self._remember_context(chat_id, prompt, answer, tool_trace, thinking_notes)
+            await self._reply_text(
+                loading or source_event,
+                answer,
+                title=self._response_title(
+                    elapsed,
+                    tool_count=len(agent_log),
+                    thinking_notes=thinking_notes,
+                ),
+                prompt=prompt,
+                agent_log=agent_log,
+                thinking_notes=thinking_notes,
+                buttons=self._final_buttons(
+                    chat_id,
+                    prompt,
+                    prompt,
+                    attachments,
+                    source_event=source_event,
+                ),
+                edit_current=True,
+            )
+            self._cleanup_runtime_run(cancel_token)
+        except Exception as exc:
+            self._cleanup_runtime_run(cancel_token)
+            self.log.debug("OA regen_prompt: exception token=%s error=%s", token, exc)
+            await self._reply_error_answer(
+                loading or source_event,
+                exc,
+                prompt=prompt,
+                full_prompt=prompt,
+                attachments=attachments,
+                source_event=source_event,
+                chat_id=chat_id,
+                started_at=started,
+                source="OpenAgent:regenerate_prompt",
+            )
 
     async def _regenerate_response(self, event: Any, token: str) -> None:
         payload = self._regen_payloads.get(token)
@@ -4037,16 +4684,17 @@ class _OpenAgentResponseMixin:
             pass
 
         cancel_token = str(uuid.uuid4())
-        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
+        self._set_placeholder_context(event, cancel_token)
+        buttons = self._runtime_control_buttons(cancel_token, event)
         try:
             edited = await event.edit(
                 self._thinking_text(),
-                buttons=[[cancel_button]],
+                buttons=buttons,
                 parse_mode="html",
             )
             loading = edited if edited and not isinstance(edited, bool) else event
             with contextlib.suppress(Exception):
-                setattr(loading, "_openagent_status_buttons", [[cancel_button]])
+                setattr(loading, "_openagent_status_buttons", buttons)
             with contextlib.suppress(Exception):
                 setattr(loading, "_openagent_source_chat_id", payload.get("chat_id"))
         except Exception:
@@ -4063,7 +4711,7 @@ class _OpenAgentResponseMixin:
                 started_at=started,
             )
             elapsed = time.monotonic() - started
-            self._remember_context(payload.get("chat_id"), payload["full_prompt"], answer, tool_trace)
+            self._remember_context(payload.get("chat_id"), payload["full_prompt"], answer, tool_trace, thinking_notes)
             await self._reply_text(
                 loading or event,
                 answer,
@@ -4084,17 +4732,20 @@ class _OpenAgentResponseMixin:
                 ),
                 edit_current=True,
             )
-            self._cancelled_generations.discard(cancel_token)
+            self._cleanup_runtime_run(cancel_token)
         except Exception as exc:
-            self._cancelled_generations.discard(cancel_token)
-            await self.kernel.handle_error(exc, source="OpenAgent:regenerate", event=event)
-            try:
-                await event.edit(
-                    html.escape(self.strings("error", error=str(exc))),
-                    parse_mode="html",
-                )
-            except Exception:
-                pass
+            self._cleanup_runtime_run(cancel_token)
+            await self._reply_error_answer(
+                loading or event,
+                exc,
+                prompt=payload["prompt"],
+                full_prompt=payload["full_prompt"],
+                attachments=payload.get("attachments") or [],
+                source_event=event,
+                chat_id=payload.get("chat_id"),
+                started_at=started,
+                source="OpenAgent:regenerate",
+            )
 
 
 
@@ -4215,8 +4866,77 @@ class _OpenAgentToolRegistryMixin:
 
         return "Unknown code tool"
 
+    def _active_session_readonly(self, chat_id: int | None) -> OASession | None:
+        if chat_id is None:
+            return None
+        with contextlib.suppress(Exception):
+            cid = int(chat_id)
+            active_id = getattr(self, "_active_session", {}).get(cid)
+            if active_id:
+                return getattr(self, "_sessions", {}).get(active_id)
+        return None
+
+    async def _prune_context_tool(self, attrs_raw: str, body: str, source_event: Any | None) -> str:
+        attrs = self._parse_xml_attrs(attrs_raw)
+        chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
+        target_raw = attrs.get("target") or attrs.get("targets") or body.strip() or "all"
+        targets = {
+            item.strip().lower()
+            for item in re.split(r"[,\s]+", target_raw)
+            if item.strip()
+        }
+        if "all" in targets:
+            targets.update({"history", "tools", "tool_memory", "runtime_comments"})
+        keep = max(0, int(attrs.get("keep", "0") or 0))
+        changed: list[str] = []
+        session = self._active_session_readonly(int(chat_id)) if chat_id is not None else None
+
+        if "history" in targets:
+            if session is not None:
+                if keep:
+                    del session.messages[:-keep]
+                else:
+                    session.messages.clear()
+                self._touch_session(session)
+                changed.append(f"history:{len(session.messages)} kept")
+            else:
+                changed.append("history:no active session")
+
+        if "tools" in targets or "tool_trace" in targets or "tool_outputs" in targets:
+            if session is not None:
+                before = len(session.messages)
+                session.messages = [
+                    msg for msg in session.messages
+                    if "OpenAgent tool trace:" not in str(msg.get("content", ""))
+                    and "Tool <" not in str(msg.get("content", ""))
+                ]
+                self._touch_session(session)
+                changed.append(f"tools:{before - len(session.messages)} removed")
+            else:
+                changed.append("tools:no active session")
+
+        if "tool_memory" in targets or "memory" in targets:
+            if chat_id is not None:
+                removed = len(self._tool_memory.pop(int(chat_id), []))
+                changed.append(f"tool_memory:{removed} removed")
+            else:
+                changed.append("tool_memory:no chat")
+
+        if "runtime_comments" in targets or "comments" in targets:
+            token = attrs.get("token") or getattr(self, "_placeholder_context", {}).get("cancel_token")
+            if token:
+                removed = len(self._runtime_comments.pop(str(token), []))
+            else:
+                removed = sum(len(items) for items in self._runtime_comments.values())
+                self._runtime_comments.clear()
+            changed.append(f"runtime_comments:{removed} removed")
+
+        return "Context prune complete: " + ("; ".join(changed) if changed else "nothing matched")
+
     async def _context_registry_tool(self, tool_name: str, attrs_raw: str, body: str, source_event: Any | None) -> str:
         chat_id = getattr(source_event, "chat_id", None) if source_event is not None else None
+        if tool_name in {"context.prune", "context.discard"}:
+            return await self._prune_context_tool(attrs_raw, body, source_event)
         if tool_name == "context.clear":
             if chat_id is not None:
                 session = self._get_active_session(int(chat_id))
@@ -4462,6 +5182,8 @@ class _OpenAgentToolRegistryMixin:
             "code.read_docs": "_fetch_mcub_docs",
             "context.remember": "_context_registry_tool",
             "context.clear": "_context_registry_tool",
+            "context.prune": "_context_registry_tool",
+            "context.discard": "_context_registry_tool",
             "context.regenerate": "_context_registry_tool",
             "context.reply_context": "_context_registry_tool",
             "context.media_context": "_context_registry_tool",
@@ -4658,7 +5380,7 @@ class OpenAgent(
     ModuleBase,
 ):
     name = "OpenAgent"
-    version = "0.7.0-beta"
+    version = "0.8.0-dev.build:1020"
     author = "@dev_dolbaeb && @Hairpin00"
     description = {
         "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",
@@ -4698,8 +5420,14 @@ class OpenAgent(
             "tool_confirmation_yes_text": "Выполнить",
             "tool_confirmation_no_text": "Не сейчас",
             "tool_validation_retry_prompt": "Это результат валидации твоего tool_call. Исправь tool_call и повтори прямо сейчас. Fix the tool call and try again now. Use only valid OpenAgent tool names, valid JSON, and args as a JSON object. If no tool is needed, answer the user in plain text with no JSON/tool_call.",
+            "runtime_comment_button": "💬 Комментировать",
+            "runtime_comment_placeholder": "Комментарий агенту...",
+            "runtime_comment_saved": "Комментарий добавлен",
+            "runtime_comment_note": "Пользователь добавил комментарий во время выполнения. Учти это в следующих шагах:\n{comments}",
             "follow_up_button": "✍️ Продолжить",
             "follow_up_placeholder": "Введи запрос...",
+            "regen_prompt_button": "🔁 Реген с промптом",
+            "regen_prompt_placeholder": "Новый промпт для регенерации...",
             "regen_stale": "Запрос устарел",
             "regenerating": "Регенерирую...",
             "new_session_name": "Новый чат",
@@ -4710,6 +5438,10 @@ class OpenAgent(
             "chat_yesterday": "вчера",
             "chat_days_ago": "{days} дн назад",
             "new_chat_button": "+ Новый чат",
+            "ask_this_chat_button": "✍️ Спросить в этом чате",
+            "ask_this_chat_placeholder": "Запрос для этого чата...",
+            "return_to_chat_button": "↩️ Вернуться в этот чат",
+            "saved_response_missing": "В истории этого чата ещё нет ответа ИИ",
             "rename_chat_button": "✏️ Переименовать",
             "delete_chat_button": "🗑 Удалить",
             "remember_chat_button": "💾 Запомнить выбор",
@@ -4815,8 +5547,14 @@ class OpenAgent(
             "tool_confirmation_yes_text": "Run",
             "tool_confirmation_no_text": "Not now",
             "tool_validation_retry_prompt": "This is the validation result for your tool_call. Fix the tool call and try again now. Use only valid OpenAgent tool names, valid JSON, and args as a JSON object. If no tool is needed, answer the user in plain text with no JSON/tool_call.",
+            "runtime_comment_button": "💬 Comment",
+            "runtime_comment_placeholder": "Comment for agent...",
+            "runtime_comment_saved": "Comment added",
+            "runtime_comment_note": "The user added a live comment while you were working. Use it in the next steps:\n{comments}",
             "follow_up_button": "✍️ Continue",
             "follow_up_placeholder": "Enter request...",
+            "regen_prompt_button": "🔁 Regen with prompt",
+            "regen_prompt_placeholder": "New prompt for regeneration...",
             "regen_stale": "Request expired",
             "regenerating": "Regenerating...",
             "new_session_name": "New chat",
@@ -4827,6 +5565,10 @@ class OpenAgent(
             "chat_yesterday": "yesterday",
             "chat_days_ago": "{days} days ago",
             "new_chat_button": "+ New chat",
+            "ask_this_chat_button": "✍️ Ask in this chat",
+            "ask_this_chat_placeholder": "Request for this chat...",
+            "return_to_chat_button": "↩️ Return to this chat",
+            "saved_response_missing": "This chat history has no AI answer yet",
             "rename_chat_button": "✏️ Rename",
             "delete_chat_button": "🗑 Delete",
             "remember_chat_button": "💾 Remember choice",
@@ -4932,8 +5674,14 @@ class OpenAgent(
             "tool_confirmation_yes_text": "Вжухнуть",
             "tool_confirmation_no_text": "Не щас",
             "tool_validation_retry_prompt": "Это результат проверки tool_call. Почини tool_call и повтори прямо сейчас. Используй только валидные OpenAgent tool names, валидный JSON и args как JSON object. Если инструмент не нужен — отвечай текстом без JSON/tool_call.",
+            "runtime_comment_button": "💬 Подкинуть мысль",
+            "runtime_comment_placeholder": "Вкинь коммент агенту...",
+            "runtime_comment_saved": "Коммент долетел",
+            "runtime_comment_note": "Юзер подкинул коммент пока ты работал. Учти дальше:\n{comments}",
             "follow_up_button": "✍️ Ещё вопросик",
             "follow_up_placeholder": "Вкидывай запрос...",
+            "regen_prompt_button": "🔁 Переварить с промптом",
+            "regen_prompt_placeholder": "Новый промпт для переварки...",
             "regen_stale": "Запрос протух",
             "regenerating": "Переварю ещё раз...",
             "new_session_name": "Новый чатик",
@@ -4944,6 +5692,10 @@ class OpenAgent(
             "chat_yesterday": "вчерась",
             "chat_days_ago": "{days} дн назад",
             "new_chat_button": "+ Новый чатик",
+            "ask_this_chat_button": "✍️ Спросить тут",
+            "ask_this_chat_placeholder": "Вкидывай запрос в этот чатик...",
+            "return_to_chat_button": "↩️ Вернуться в чатик",
+            "saved_response_missing": "В истории чатка ещё нет ответа ИИ",
             "rename_chat_button": "✏️ Переобозвать",
             "delete_chat_button": "🗑 Снести",
             "remember_chat_button": "💾 Запомнить прикол",
@@ -5049,8 +5801,14 @@ class OpenAgent(
             "tool_confirmation_yes_text": "exec",
             "tool_confirmation_no_text": "skip",
             "tool_validation_retry_prompt": "tool_call validation output. Fix the tool call and retry now. Use only valid OpenAgent tool names, valid JSON, and args as a JSON object. If no tool is needed, answer the user in plain text with no JSON/tool_call.",
+            "runtime_comment_button": "💬 stdin+",
+            "runtime_comment_placeholder": "append runtime comment...",
+            "runtime_comment_saved": "comment queued",
+            "runtime_comment_note": "Runtime user comment received. Apply it in next steps:\n{comments}",
             "follow_up_button": "✍️ stdin",
             "follow_up_placeholder": "type request...",
+            "regen_prompt_button": "🔁 rerun stdin",
+            "regen_prompt_placeholder": "new rerun prompt...",
             "regen_stale": "request expired",
             "regenerating": "rerunning...",
             "new_session_name": "new-chat",
@@ -5061,6 +5819,10 @@ class OpenAgent(
             "chat_yesterday": "yesterday",
             "chat_days_ago": "{days}d ago",
             "new_chat_button": "+ fork session",
+            "ask_this_chat_button": "✍️ stdin to this session",
+            "ask_this_chat_placeholder": "stdin for this session...",
+            "return_to_chat_button": "↩️ return to this session",
+            "saved_response_missing": "session history has no assistant stdout yet",
             "rename_chat_button": "✏️ mv session",
             "delete_chat_button": "🗑 rm session",
             "remember_chat_button": "💾 persist choice",
@@ -5171,6 +5933,13 @@ class OpenAgent(
         "deepseek": "https://api.deepseek.com/v1",
         "xai": "https://api.x.ai/v1",
     }
+    PLACEHOLDER_KEYS = (
+        "{agent_version}, {provider}, {provider_key}, {model}, {reasoning_effort}, "
+        "{chat_id}, {user_id}, {session_name}, {session_messages}, "
+        "{runtime_comments_count}, {runtime_comments}, {tool_count}, {available_tool_count}, "
+        "{elapsed}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, "
+        "{todo}, {random}, {prefix}, {time}, {date}"
+    )
     WEB_SEARCH_RE = re.compile(
         r"<web_search>\s*(.*?)\s*</web_search>", re.DOTALL | re.I
     )
@@ -5233,6 +6002,7 @@ class OpenAgent(
         "party": '<tg-emoji emoji-id="5368635272332352173">🎉</tg-emoji>',
         "loading_dots": '<tg-emoji emoji-id="5328311576736833844">🔴</tg-emoji>',
         "loading_wait": '<tg-emoji emoji-id="5326015457155620929">😐</tg-emoji>',
+        "reconnect": '<tg-emoji emoji-id="5325872701032635449">⏳</tg-emoji>',
         "loading_squares": '<tg-emoji emoji-id="5334960765931626355">🎲</tg-emoji>',
         "loading_lava": '<tg-emoji emoji-id="5310041868191407556">🩸</tg-emoji>',
         "soon": '<tg-emoji emoji-id="5411382892850871522">🔜</tg-emoji>',
@@ -5320,6 +6090,12 @@ class OpenAgent(
             180,
             description="HTTP timeout seconds for each provider request. Increase for slow reasoning/code tasks.",
             validator=Integer(default=180, min=10, max=600),
+        ),
+        ConfigValue(
+            "provider_reconnect_attempts",
+            5,
+            description="Maximum reconnect attempts after provider API timeout",
+            validator=Integer(default=5, min=0, max=5),
         ),
         ConfigValue(
             "terminal_enabled",
@@ -5486,31 +6262,31 @@ class OpenAgent(
         ConfigValue(
             "response_header",
             "<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>",
-            description="Final response header template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            description="Final response header template. Placeholders: " + PLACEHOLDER_KEYS,
             validator=String(default="<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>"),
         ),
         ConfigValue(
             "request_label",
             "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
-            description="Request block label template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            description="Request block label template. Placeholders: " + PLACEHOLDER_KEYS,
             validator=String(default="<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>"),
         ),
         ConfigValue(
             "response_label",
             "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
-            description="Response block label template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            description="Response block label template. Placeholders: " + PLACEHOLDER_KEYS,
             validator=String(default="<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>"),
         ),
         ConfigValue(
             "thinking_template",
             "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            description="Initial loading/thinking message template. Placeholders: {provider}, {provider_key}, {model}, {reasoning_effort}, {elapsed}, {tool_count}, {input_tokens}, {output_tokens}, {total_tokens}, {thinking}, {random}, {prefix}, {time}, {date}",
+            description="Initial loading/thinking message template. Placeholders: " + PLACEHOLDER_KEYS,
             validator=String(default="<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>"),
         ),
         ConfigValue(
             "tool_display_template",
             "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
-            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General: {provider}, {model}, {reasoning_effort}, {elapsed}, {thinking}, {random}, {prefix}, {time}, {date}",
+            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General placeholders: " + PLACEHOLDER_KEYS,
             validator=String(
                 default="<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
             ),
@@ -5525,7 +6301,7 @@ class OpenAgent(
             "tool_display_max_chars",
             1200,
             description="Maximum chars from current tool input shown in status form",
-            validator=Integer(default=1200, min=80, max=4000),
+            validator=Integer(default=1200, min=0, max=4000),
         ),
         ConfigValue(
             "tool_display_log_lines",
@@ -5697,7 +6473,7 @@ class OpenAgent(
             return "\n\n".join(self._outputs).strip()
 
     @callback(ttl=900)
-    async def _open_sessions_panel(self, call: events.CallbackQuery.Event, chat_id: int | None = None) -> None:
+    async def _open_sessions_panel(self, call: InlineMessage, chat_id: int | None = None) -> None:
         cid = int(chat_id or getattr(call, "chat_id", 0) or getattr(call, "_openagent_source_chat_id", 0) or 0)
         if not cid:
             await call.answer(self.strings("error", error="chat_id is missing"), alert=True)
@@ -5705,12 +6481,41 @@ class OpenAgent(
         await self._show_sessions_panel(call, cid)
 
     @callback(ttl=900)
-    async def _switch_session(self, call: events.CallbackQuery.Event, session_id: str) -> None:
+    async def _return_to_last_response(self, call: InlineMessage, chat_id: int) -> None:
+        cid = int(chat_id)
+        saved_turn = self._last_saved_assistant_turn(cid)
+        if not saved_turn:
+            await call.answer(self.strings("saved_response_missing"), alert=True)
+            return
+        prompt, answer, thinking_notes = saved_turn
+        with contextlib.suppress(Exception):
+            setattr(call, "_openagent_source_chat_id", cid)
+        self._set_placeholder_context(call)
+        await self._reply_text(
+            call,
+            answer,
+            title=self._response_title(0.0, tool_count=0, thinking_notes=thinking_notes),
+            prompt=prompt,
+            thinking_notes=thinking_notes,
+            buttons=self._final_buttons(
+                cid,
+                prompt,
+                prompt,
+                [],
+                source_event=call,
+            ),
+            edit_current=True,
+        )
+        self._store_last_loading(cid, call)
+
+    @callback(ttl=900)
+    async def _switch_session(self, call: InlineMessage, session_id: str) -> None:
         session = self._sessions.get(str(session_id))
         if session is None:
             await call.answer(self.strings("skill_not_found"), alert=True)
             return
         self._set_active_session(session.chat_id, session.id)
+        self.session_manager.set_preference(session.chat_id, "continue")
         await self._show_sessions_panel(
             call,
             session.chat_id,
@@ -5718,12 +6523,13 @@ class OpenAgent(
         )
 
     @callback(ttl=900)
-    async def _remember_session_choice(self, call: events.CallbackQuery.Event, chat_id: int) -> None:
+    async def _remember_session_choice(self, call: InlineMessage, chat_id: int) -> None:
+        self.session_manager.set_preference(int(chat_id), "continue")
         await self._save_sessions()
         await call.answer(self.strings("chat_choice_saved"), alert=True)
 
     @callback(ttl=900)
-    async def _delete_active_session(self, call: events.CallbackQuery.Event, chat_id: int) -> None:
+    async def _delete_active_session(self, call: InlineMessage, chat_id: int) -> None:
         cid = int(chat_id)
         sessions = self._get_chat_sessions(cid)
         if len(sessions) <= 1:
@@ -5737,30 +6543,34 @@ class OpenAgent(
         await self._show_sessions_panel(call, cid, alert=self.strings("chat_deleted"))
 
     @callback(ttl=900)
-    async def _run_pending_here(self, call: events.CallbackQuery.Event, prompt_token: str) -> None:
+    async def _run_pending_here(self, call: InlineMessage, prompt_token: str) -> None:
         """Run pending prompt in the current active session."""
+        chat_id = self._pending_prompts.get(prompt_token, {}).get("chat_id")
+        if chat_id:
+            self.session_manager.set_preference(int(chat_id), "continue")
         await self._execute_pending(call, prompt_token)
 
     @callback(ttl=900)
     async def _run_pending_in(
         self,
-        call: events.CallbackQuery.Event,
+        call: InlineMessage,
         prompt_token: str,
         session_id: str,
     ) -> None:
         """Switch to another session, then run the pending prompt."""
-        chat_id = (
-            getattr(call, "chat_id", None)
-            or self._pending_prompts.get(prompt_token, {}).get("chat_id")
-        )
-        if chat_id:
-            self._set_active_session(int(chat_id), session_id)
+        session = self._sessions.get(str(session_id))
+        if session is None:
+            with contextlib.suppress(Exception):
+                await call.answer(self.strings("chat_delete_last"), alert=True)
+            return
+        self._set_active_session(session.chat_id, session.id)
+        self.session_manager.set_preference(session.chat_id, "continue")
         await self._execute_pending(call, prompt_token)
 
     @callback(ttl=900)
     async def _remember_pref_continue(
         self,
-        call: events.CallbackQuery.Event,
+        call: InlineMessage,
         prompt_token: str,
         chat_id: int,
     ) -> None:
@@ -5773,14 +6583,14 @@ class OpenAgent(
     @callback(ttl=900)
     async def _remember_pref_new(
         self,
-        call: events.CallbackQuery.Event,
+        call: InlineMessage,
         prompt_token: str,
         chat_id: int,
     ) -> None:
         """Save 'always create new' pref, create new session, then run."""
         cid = int(chat_id)
         self.session_manager.set_preference(cid, "new")
-        self._new_session(cid)
+        self._fresh_session(cid)
         with contextlib.suppress(Exception):
             await call.answer(self.strings("pref_saved"), alert=False)
         await self._execute_pending(call, prompt_token)
@@ -5788,7 +6598,7 @@ class OpenAgent(
     @callback(ttl=900)
     async def _confirm_tool_action(
         self,
-        call: events.CallbackQuery.Event,
+        call: InlineMessage,
         token: str | None = None,
         approved: bool = False,
     ) -> None:
@@ -5803,7 +6613,7 @@ class OpenAgent(
             )
 
     @callback(ttl=900)
-    async def _activate_inline_status(self, call: events.CallbackQuery.Event, token: str | None = None) -> None:
+    async def _activate_inline_status(self, call: InlineMessage, token: str | None = None) -> None:
         if token:
             future = self._inline_status_waiters.get(token)
             if future is not None and not future.done():
@@ -5811,15 +6621,201 @@ class OpenAgent(
         with contextlib.suppress(Exception):
             await call.answer()
 
+    def _oa_arg_parser(self, event: Event) -> Any | None:
+        with contextlib.suppress(Exception):
+            return self.args(event)
+        return None
+
+    def _oa_prompt_from_parser(self, parser: Any | None) -> str:
+        if parser is None:
+            return ""
+        raw = str(getattr(parser, "raw_args", "") or "")
+        raw = re.sub(r"(?<!\S)--test(?:=\S+|\s+\S+)?", "", raw)
+        raw = re.sub(r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", "", raw)
+        return re.sub(r"\s+", " ", raw).strip()
+
+    def _oa_new_chat_arg(self, parser: Any | None) -> tuple[bool, str]:
+        if parser is None:
+            return False, ""
+        raw = str(getattr(parser, "raw_args", "") or "")
+        match = re.search(r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", raw)
+        if not match:
+            return False, ""
+        token = match.group(0)
+        if "=" not in token:
+            return True, ""
+        name = token.split("=", 1)[1].strip()
+        if len(name) >= 2 and (
+            (name[0] == name[-1] and name[0] in {'\"', "'"})
+            or (name[0] == "{" and name[-1] == "}")
+        ):
+            name = name[1:-1]
+        return True, name.strip()[:64]
+
+    def _oa_test_name(self, parser: Any | None) -> str:
+        if parser is None or not hasattr(parser, "get_kwarg"):
+            return ""
+        return str(parser.get_kwarg("test", "") or "").strip().lower()
+
+    async def _run_oa_test(self, event: Event, name: str) -> None:
+        """Run internal OpenAgent smoke tests without hitting real provider APIs."""
+        name = (name or "").strip().lower()
+        old_once = self._ask_provider_once
+        old_show = self._show_agent_action
+        old_sleep = asyncio.sleep
+        calls: list[int] = []
+        statuses: list[str] = []
+        log: list[str] = []
+
+        async def no_sleep(_delay: float) -> None:
+            return None
+
+        async def fake_show(_event: Any, title: str, value: str, _log: list[str], tool_name: str = "", **_kwargs: Any) -> None:
+            statuses.append(f"{title}:{tool_name}:{value}")
+
+        try:
+            asyncio.sleep = no_sleep
+            self._show_agent_action = fake_show  # type: ignore[method-assign]
+            if name == "reconnect":
+                async def fake_once(_provider: str, _messages: list[dict[str, Any]], _api_key: str, *, max_tokens_override: int | None = None) -> str:
+                    calls.append(1)
+                    if len(calls) <= 5:
+                        raise RuntimeError("Provider request timed out after 1s")
+                    return "ok"
+
+                self._ask_provider_once = fake_once  # type: ignore[method-assign]
+                result = await self._ask_provider_with_reconnect(
+                    "openai", [], "test-key", status_event=event, agent_log=log, started_at=time.monotonic(), thinking_notes=[]
+                )
+                text = (
+                    "Reconnect test OK\n"
+                    f"result={result}\n"
+                    f"calls={len(calls)}\n"
+                    f"statuses={len(statuses)}\n"
+                    f"log={', '.join(log)}"
+                )
+            elif name == "timeout_provider":
+                max_reconnects = max(0, min(int(self.config.get("provider_reconnect_attempts", 5) or 0), 5))
+
+                async def fake_once_timeout(_provider: str, _messages: list[dict[str, Any]], _api_key: str, *, max_tokens_override: int | None = None) -> str:
+                    calls.append(1)
+                    raise RuntimeError("Provider request timed out after 1s")
+
+                self._ask_provider_once = fake_once_timeout  # type: ignore[method-assign]
+                try:
+                    await self._ask_provider_with_reconnect(
+                        "openai", [], "test-key", status_event=event, agent_log=log, started_at=time.monotonic(), thinking_notes=[]
+                    )
+                except Exception as exc:
+                    text = (
+                        "Timeout provider test OK\n"
+                        f"max_reconnects={max_reconnects}\n"
+                        f"calls={len(calls)}\n"
+                        f"statuses={len(statuses)}\n"
+                        f"error={type(exc).__name__}: {exc}\n"
+                        f"log={', '.join(log)}"
+                    )
+                else:
+                    text = "Timeout provider test FAILED: expected timeout"
+            else:
+                text = f"Unknown OpenAgent test: {name}"
+        finally:
+            self._ask_provider_once = old_once  # type: ignore[method-assign]
+            self._show_agent_action = old_show  # type: ignore[method-assign]
+            asyncio.sleep = old_sleep
+        await self.edit(event, html.escape(text), as_html=True)
+
+    def _config_export_blocked_keys(self) -> set[str]:
+        return {"api_key", "provider", "model", "custom_base_url"}
+
+    def _exportable_config(self) -> dict[str, Any]:
+        blocked = self._config_export_blocked_keys()
+        data = self.config.to_dict()
+        return {
+            key: value
+            for key, value in data.items()
+            if key not in blocked and value is not None
+        }
+
+    async def _read_import_payload(self, event: Event) -> str:
+        raw = self._args_raw(event)
+        if raw.strip():
+            payload = raw.strip()
+            if not payload.startswith("{"):
+                raise ValueError("Pass a JSON object after .oaimport or reply to openagent-settings.json")
+            return payload
+        reply = await event.get_reply_message()
+        if not reply:
+            return ""
+        file_name = getattr(getattr(reply, "file", None), "name", None) or ""
+        if file_name.lower().endswith(".json"):
+            data = await reply.download_media(file=bytes)
+            if data:
+                payload = data.decode("utf-8", errors="replace").strip()
+                if payload.startswith("{"):
+                    return payload
+                raise ValueError("Replied .json file does not contain a JSON object")
+        text = getattr(reply, "raw_text", None) or getattr(reply, "text", None) or ""
+        if text.strip():
+            payload = text.strip()
+            if payload.startswith("{"):
+                return payload
+            raise ValueError("Replied message is not OpenAgent settings JSON. Reply to openagent-settings.json or JSON text.")
+        data = await reply.download_media(file=bytes)
+        if data:
+            payload = data.decode("utf-8", errors="replace").strip()
+            if payload.startswith("{"):
+                return payload
+            raise ValueError("Replied file does not contain a JSON object")
+        return ""
+
+    def _parse_import_config(self, payload: str) -> dict[str, Any]:
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid OpenAgent settings JSON: {exc.msg}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("JSON object expected")
+        settings = data.get("settings", data)
+        if not isinstance(settings, dict):
+            raise ValueError("settings object expected")
+        return settings
+
+    async def _apply_import_config(self, settings: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+        blocked = self._config_export_blocked_keys()
+        known = set(self.config.keys())
+        applied: list[str] = []
+        skipped: list[str] = []
+        failed: list[str] = []
+        for key, value in settings.items():
+            key = str(key)
+            if key in blocked or key not in known:
+                skipped.append(key)
+                continue
+            try:
+                self.config[key] = value
+                applied.append(key)
+            except Exception as exc:
+                failed.append(f"{key}: {exc}")
+        if applied:
+            await self.save_config()
+        return applied, skipped, failed
+
     @command(
         "oa",
         alias=["agent"],
-        doc_ru="<запрос> спросить ИИ агента; --chats открыть меню чатов; --clear очистить текущий чат",
-        doc_en="<prompt> ask AI agent; --chats open chat menu; --clear clear current chat",
+        doc_ru="<запрос> спросить ИИ агента; --new[=имя] новый чат; --chats меню; --clear очистить",
+        doc_en="<prompt> ask AI agent; --new[=name] new chat; --chats menu; --clear clear",
     )
-    async def cmd_oa(self, event: events.NewMessage.Event) -> None:
-        prompt = self._args_raw(event)
-        if prompt.strip() == "--clear":
+    async def cmd_oa(self, event: Event) -> None:
+        parser = self._oa_arg_parser(event)
+        prompt = self._oa_prompt_from_parser(parser) if parser is not None else self._args_raw(event)
+        new_chat, new_chat_name = self._oa_new_chat_arg(parser)
+        test_name = self._oa_test_name(parser)
+        if test_name:
+            await self._run_oa_test(event, test_name)
+            return
+        if prompt.strip() == "--clear" or (parser is not None and parser.get_flag("clear")):
             chat_id = getattr(event, "chat_id", None)
             if chat_id is not None:
                 session = self._get_active_session(int(chat_id))
@@ -5830,7 +6826,7 @@ class OpenAgent(
             else:
                 await self.edit(event, self.strings("need_text"))
             return
-        if prompt.strip() == "--chats":
+        if prompt.strip() == "--chats" or (parser is not None and parser.get_flag("chats")):
             chat_id = getattr(event, "chat_id", None)
             if chat_id is not None:
                 await self._show_sessions_panel(event, int(chat_id), force_inline=True)
@@ -5843,6 +6839,16 @@ class OpenAgent(
         if not prompt:
             chat_id = getattr(event, "chat_id", None)
             if chat_id is not None:
+                if new_chat:
+                    session = self._new_session(int(chat_id), name=new_chat_name or None)
+                    self.session_manager.set_preference(int(chat_id), "continue")
+                    await self._show_sessions_panel(
+                        event,
+                        int(chat_id),
+                        force_inline=True,
+                        alert=self.strings("chat_created", name=session.name),
+                    )
+                    return
                 await self._show_sessions_panel(event, int(chat_id), force_inline=True)
             else:
                 await self.edit(event, self.strings("need_text"))
@@ -5854,19 +6860,23 @@ class OpenAgent(
 
         chat_id = getattr(event, "chat_id", None)
         if chat_id is not None:
-            pref = self._session_prefs.get(int(chat_id), "ask")
-            sessions = self._get_chat_sessions(int(chat_id))
-            if pref == "new":
-                self._new_session(int(chat_id))
-            elif pref == "ask" and len(sessions) > 1:
-                prompt_token = self._store_pending_prompt(
-                    int(chat_id), prompt, full_prompt, attachments
-                )
-                await self._show_oa_choice_panel(event, int(chat_id), prompt_token)
-                return
+            if new_chat:
+                self._new_session(int(chat_id), name=new_chat_name or None)
+                self.session_manager.set_preference(int(chat_id), "continue")
+            else:
+                pref = self._session_prefs.get(int(chat_id), "ask")
+                sessions = self._get_chat_sessions(int(chat_id))
+                if pref == "new":
+                    self._fresh_session(int(chat_id))
+                elif pref == "ask" and len(sessions) > 1:
+                    prompt_token = self._store_pending_prompt(
+                        int(chat_id), prompt, full_prompt, attachments, source_event=event
+                    )
+                    await self._show_oa_choice_panel(event, int(chat_id), prompt_token)
+                    return
 
         cancel_token = str(uuid.uuid4())
-        cancel_button = self._direct_button(self.strings("cancel_button"), "cancel", {"token": cancel_token})
+        self._set_placeholder_context(event, cancel_token)
         self.log.debug(
             "OA cmd_oa: chat_id=%s prompt_len=%d reply=%s attachments=%d",
             chat_id, len(prompt), bool(reply_context), len(attachments or []),
@@ -5874,7 +6884,7 @@ class OpenAgent(
         loading = await self._start_inline_status(
             event,
             self._thinking_text(),
-            [[cancel_button]],
+            self._runtime_control_buttons(cancel_token, event),
         )
         started = time.monotonic()
         self.log.debug(
@@ -5894,7 +6904,7 @@ class OpenAgent(
             )
             self._last_request_at = time.time()
             elapsed = time.monotonic() - started
-            self._remember_context(getattr(event, "chat_id", None), full_prompt, answer, tool_trace)
+            self._remember_context(getattr(event, "chat_id", None), full_prompt, answer, tool_trace, thinking_notes)
             await self._reply_text(
                 loading or event,
                 answer,
@@ -5915,18 +6925,70 @@ class OpenAgent(
                 ),
                 edit_current=True,
             )
-            self._cancelled_generations.discard(cancel_token)
+            self._store_last_loading(getattr(event, "chat_id", None), loading)
+            self._cleanup_runtime_run(cancel_token)
         except Exception as exc:
-            self._cancelled_generations.discard(cancel_token)
-            await self.kernel.handle_error(exc, source="OpenAgent", event=event)
-            await self.edit(
+            self._cleanup_runtime_run(cancel_token)
+            await self._reply_error_answer(
                 loading or event,
-                html.escape(self.strings("error", error=str(exc))),
-                as_html=True,
+                exc,
+                prompt=prompt,
+                full_prompt=full_prompt,
+                attachments=attachments,
+                source_event=event,
+                chat_id=getattr(event, "chat_id", None),
+                started_at=started,
+                source="OpenAgent",
             )
 
+    @command("oaexport", doc_ru="экспорт настроек OpenAgent без секретов", doc_en="export OpenAgent settings without secrets")
+    async def cmd_oaexport(self, event: Event) -> None:
+        payload = {
+            "name": "OpenAgent settings",
+            "version": 1,
+            "blocked_keys": sorted(self._config_export_blocked_keys()),
+            "settings": self._exportable_config(),
+        }
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        data = io.BytesIO(text.encode("utf-8"))
+        data.name = "openagent-settings.json"
+        try:
+            await self.client.send_file(
+                event.chat_id,
+                data,
+                caption="OpenAgent settings export (without provider/API secrets)",
+            )
+            with contextlib.suppress(Exception):
+                await event.delete()
+        except Exception:
+            await self.edit(event, f"<pre>{html.escape(text)}</pre>", as_html=True)
+
+    @command("oaimport", doc_ru="импорт настроек OpenAgent без секретов из reply/JSON", doc_en="import OpenAgent settings without secrets from reply/JSON")
+    async def cmd_oaimport(self, event: Event) -> None:
+        try:
+            payload = await self._read_import_payload(event)
+            if not payload:
+                await self.edit(event, "Reply to openagent-settings.json or pass JSON after .oaimport")
+                return
+            settings = self._parse_import_config(payload)
+            applied, skipped, failed = await self._apply_import_config(settings)
+        except Exception as exc:
+            await self.edit(event, self.strings("error", error=html.escape(str(exc))), as_html=True)
+            return
+        lines = [
+            "OpenAgent settings import complete",
+            f"applied: {len(applied)}",
+            f"skipped: {len(skipped)}",
+            f"failed: {len(failed)}",
+        ]
+        if skipped:
+            lines.append("skipped keys: " + ", ".join(sorted(skipped)[:30]))
+        if failed:
+            lines.append("failed keys: " + "; ".join(failed[:10]))
+        await self.edit(event, "<blockquote>" + html.escape("\n".join(lines)) + "</blockquote>", as_html=True)
+
     @command("skills", doc_ru="список скиллов OpenAgent", doc_en="list OpenAgent skills")
-    async def cmd_skills(self, event: events.NewMessage.Event) -> None:
+    async def cmd_skills(self, event: Event) -> None:
         arg = self._args_raw(event)
         if arg in {"-repo", "--repo", "repo"}:
             try:
@@ -5958,7 +7020,7 @@ class OpenAgent(
         await self.edit(event, "<pre>" + html.escape("\n".join(lines)) + "</pre>", as_html=True)
 
     @command("skillinstall", alias=["ssinstall"], doc_ru="<name> установить OpenAgent skill из repo", doc_en="<name> install OpenAgent skill from repo")
-    async def cmd_skillinstall(self, event: events.NewMessage.Event) -> None:
+    async def cmd_skillinstall(self, event: Event) -> None:
         name = self._args_raw(event)
         if not name:
             await self.edit(event, self.strings("skillinstall_usage"))
@@ -5971,7 +7033,7 @@ class OpenAgent(
         await self.edit(event, self.strings("skill_installed", name=html.escape(saved_name)), as_html=True)
 
     @command("sendss", doc_ru="<name> отправить .md скилл", doc_en="<name> send skill .md")
-    async def cmd_sendss(self, event: events.NewMessage.Event) -> None:
+    async def cmd_sendss(self, event: Event) -> None:
         name = self._args_raw(event)
         if not name:
             await self.edit(event, self.strings("sendss_usage"))
@@ -5992,7 +7054,7 @@ class OpenAgent(
             pass
 
     @command("imss", doc_ru="[name] импортировать .md скилл из reply", doc_en="[name] import .md skill from reply")
-    async def cmd_imss(self, event: events.NewMessage.Event) -> None:
+    async def cmd_imss(self, event: Event) -> None:
         reply = await event.get_reply_message()
         if not reply:
             await self.edit(event, self.strings("imss_need_reply"))
@@ -6025,7 +7087,7 @@ class OpenAgent(
         await self.edit(event, self.strings("skill_imported", name=html.escape(saved_name)), as_html=True)
 
     @command("delss", doc_ru="<name> удалить скилл", doc_en="<name> delete skill")
-    async def cmd_delss(self, event: events.NewMessage.Event) -> None:
+    async def cmd_delss(self, event: Event) -> None:
         name = self._args_raw(event)
         if not name:
             await self.edit(event, self.strings("delss_usage"))
@@ -6043,7 +7105,7 @@ class OpenAgent(
         await self.edit(event, self.strings("skill_deleted", name=html.escape(self._skill_name_from_path(path))), as_html=True)
 
     @command("oaplugin", doc_ru="управление плагинами OpenAgent", doc_en="manage OpenAgent plugins")
-    async def cmd_oaplugin(self, event: events.NewMessage.Event) -> None:
+    async def cmd_oaplugin(self, event: Event) -> None:
         """Show plugin manager or install a plugin from replied .py file."""
         if await event.get_reply_message():
             try:
@@ -6083,14 +7145,14 @@ class OpenAgent(
             await self.edit(event, text, as_html=True)
 
     @callback(ttl=900)
-    async def _oaplugin_close(self, call: events.CallbackQuery.Event) -> None:
+    async def _oaplugin_close(self, call: InlineMessage) -> None:
         try:
             await call.delete()
         except Exception:
             await call.answer()
 
     @callback(ttl=900)
-    async def _oaplugin_catalog(self, call: events.CallbackQuery.Event, page: int = 0) -> None:
+    async def _oaplugin_catalog(self, call: InlineMessage, page: int = 0) -> None:
         """Show available plugins from repo (xheta-style)."""
         plugins = self._plugins_cache
         if not plugins:
@@ -6145,11 +7207,11 @@ class OpenAgent(
             pass
 
     @callback(ttl=900)
-    async def _oaplugin_noop(self, call: events.CallbackQuery.Event) -> None:
+    async def _oaplugin_noop(self, call: InlineMessage) -> None:
         await call.answer()
 
     @callback(ttl=900)
-    async def _oaplugin_main(self, call: events.CallbackQuery.Event) -> None:
+    async def _oaplugin_main(self, call: InlineMessage) -> None:
         """Return to main plugin page."""
         installed = self._plugins
         text = self.strings("plugins_enabled_title")
@@ -6173,7 +7235,7 @@ class OpenAgent(
             pass
 
     @callback(ttl=900)
-    async def _oaplugin_install(self, call: events.CallbackQuery.Event, name: str, page: int = 0) -> None:
+    async def _oaplugin_install(self, call: InlineMessage, name: str, page: int = 0) -> None:
         """Download and install a plugin from repo."""
         await call.answer(self.strings("plugin_installing"), alert=False)
         try:
@@ -6189,7 +7251,7 @@ class OpenAgent(
             await self._oaplugin_catalog(call, 0)
 
     @callback(ttl=900)
-    async def _oaplugin_manager(self, call: events.CallbackQuery.Event, page: int = 0) -> None:
+    async def _oaplugin_manager(self, call: InlineMessage, page: int = 0) -> None:
         """Show installed plugins with delete option."""
         installed = list(self._plugins.values())
         if not installed:
@@ -6220,7 +7282,7 @@ class OpenAgent(
             pass
 
     @callback(ttl=900)
-    async def _oaplugin_uninstall(self, call: events.CallbackQuery.Event, name: str, page: int = 0) -> None:
+    async def _oaplugin_uninstall(self, call: InlineMessage, name: str, page: int = 0) -> None:
         """Delete a plugin."""
         try:
             name = self._safe_plugin_name(name)
