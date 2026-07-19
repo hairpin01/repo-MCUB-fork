@@ -113,22 +113,6 @@ def _openagent_lib_has_version(package_dir: Path) -> bool:
     return True
 
 
-def _openagent_local_lib_dirs() -> tuple[Path, ...]:
-    here = Path(__file__).resolve().parent
-    return (
-        here / "lib" / "OpenAgent",
-        Path.cwd() / "lib" / "OpenAgent",
-    )
-
-
-def _openagent_copy_lib(src_dir: Path, package_dir: Path) -> bool:
-    if not all((src_dir / rel).is_file() for rel in _OPENAGENT_LIB_FILES):
-        return False
-    for rel in _OPENAGENT_LIB_FILES:
-        _openagent_write_atomic(package_dir / rel, (src_dir / rel).read_bytes())
-    return True
-
-
 def _openagent_download_lib(package_dir: Path) -> None:
     from urllib.request import Request, urlopen
 
@@ -147,21 +131,19 @@ def _openagent_ensure_custom_lib() -> None:
     if _openagent_lib_has_version(package_dir):
         return
 
-    copied = False
-    for src_dir in _openagent_local_lib_dirs():
-        if _openagent_copy_lib(src_dir, package_dir):
-            copied = True
-            break
+    try:
+        _openagent_download_lib(package_dir)
+    except Exception as exc:
+        raise ImportError(
+            "OpenAgent runtime library is missing and could not be loaded "
+            "from GitHub into core/lib/custom/OpenAgent"
+        ) from exc
 
-    if not copied and not _openagent_lib_has_version(package_dir):
-        try:
-            _openagent_download_lib(package_dir)
-        except Exception as exc:
-            if not all((package_dir / rel).is_file() for rel in _OPENAGENT_LIB_FILES):
-                raise ImportError(
-                    "OpenAgent runtime library is missing and could not be loaded "
-                    "from GitHub into core/lib/custom/OpenAgent"
-                ) from exc
+    if not _openagent_lib_has_version(package_dir):
+        raise ImportError(
+            "OpenAgent runtime library was loaded into core/lib/custom/OpenAgent "
+            "but does not match the required version"
+        )
 
     importlib.invalidate_caches()
     for module_name in (
