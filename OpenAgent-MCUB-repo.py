@@ -113,17 +113,54 @@ def _openagent_lib_has_version(package_dir: Path) -> bool:
     return True
 
 
-def _openagent_download_lib(package_dir: Path) -> None:
+def _openagent_latest_lib_url(rel: str) -> str:
+    return f"{_OPENAGENT_LIB_RAW_BASE.rstrip('/')}/{quote(rel, safe='/')}"
+
+
+def _openagent_old_lib_url(rel: str) -> str:
+    lib_module = rel[:-3] if rel.endswith(".py") else rel
+    old_rel = f"old/{lib_module}@{_OPENAGENT_LIB_VERSION}"
+    return f"{_OPENAGENT_LIB_RAW_BASE.rstrip('/')}/{quote(old_rel, safe='/@')}"
+
+
+def _openagent_fetch_url(url: str) -> bytes:
     from urllib.request import Request, urlopen
 
+    request = Request(url, headers={"User-Agent": "MCUB-OpenAgent"})
+    with urlopen(request, timeout=20) as response:
+        return response.read()
+
+
+def _openagent_fetch_lib(*, old: bool = False) -> dict[str, bytes]:
     payloads: dict[str, bytes] = {}
     for rel in _OPENAGENT_LIB_FILES:
-        url = f"{_OPENAGENT_LIB_RAW_BASE}/{quote(rel)}"
-        request = Request(url, headers={"User-Agent": "MCUB-OpenAgent"})
-        with urlopen(request, timeout=20) as response:
-            payloads[rel] = response.read()
+        url = _openagent_old_lib_url(rel) if old else _openagent_latest_lib_url(rel)
+        payloads[rel] = _openagent_fetch_url(url)
+    return payloads
+
+
+def _openagent_payload_has_version(payloads: dict[str, bytes]) -> bool:
+    marker = f"OPENAGENT_LIB_VERSION = {_OPENAGENT_LIB_VERSION!r}"
+    for rel in _OPENAGENT_LIB_FILES:
+        try:
+            if marker not in payloads[rel].decode("utf-8"):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _openagent_install_payload(package_dir: Path, payloads: dict[str, bytes]) -> None:
     for rel, data in payloads.items():
         _openagent_write_atomic(package_dir / rel, data)
+
+
+def _openagent_download_matching_lib(package_dir: Path, *, old: bool = False) -> bool:
+    payloads = _openagent_fetch_lib(old=old)
+    if not _openagent_payload_has_version(payloads):
+        return False
+    _openagent_install_payload(package_dir, payloads)
+    return True
 
 
 def _openagent_ensure_custom_lib() -> None:
@@ -131,19 +168,32 @@ def _openagent_ensure_custom_lib() -> None:
     if _openagent_lib_has_version(package_dir):
         return
 
-    try:
-        _openagent_download_lib(package_dir)
-    except Exception as exc:
-        raise ImportError(
-            "OpenAgent runtime library is missing and could not be loaded "
-            "from GitHub into core/lib/custom/OpenAgent"
-        ) from exc
+    latest_error: Exception | None = None
+    old_error: Exception | None = None
+    installed = False
 
-    if not _openagent_lib_has_version(package_dir):
-        raise ImportError(
-            "OpenAgent runtime library was loaded into core/lib/custom/OpenAgent "
-            "but does not match the required version"
+    try:
+        installed = _openagent_download_matching_lib(package_dir)
+    except Exception as exc:
+        latest_error = exc
+
+    if not installed:
+        try:
+            installed = _openagent_download_matching_lib(package_dir, old=True)
+        except Exception as exc:
+            old_error = exc
+
+    if not installed:
+        message = (
+            "OpenAgent runtime library is missing or version-mismatched; "
+            "tried latest lib/OpenAgent files and old/{python_module}@{version_lib} "
+            "files before loading into core/lib/custom/OpenAgent"
         )
+        if old_error is not None:
+            raise ImportError(message) from old_error
+        if latest_error is not None:
+            raise ImportError(message) from latest_error
+        raise ImportError(message)
 
     importlib.invalidate_caches()
     for module_name in (
