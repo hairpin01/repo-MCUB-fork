@@ -78,7 +78,7 @@ from core.lib.loader.module_config import (
 if TYPE_CHECKING:
     from core.lib.types import InlineMessage, Event, Kernel
 
-_OPENAGENT_LIB_VERSION = '0.8.0-main.build:1040'
+_OPENAGENT_LIB_VERSION = '0.8.0-main.build:1041'
 _OPENAGENT_LIB_FILES = ('__init__.py', 'mixins.py')
 _OPENAGENT_LIB_RAW_BASE = 'https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/lib/OpenAgent'
 
@@ -119,7 +119,7 @@ def _openagent_latest_lib_url(rel: str) -> str:
 
 def _openagent_old_lib_url(rel: str) -> str:
     lib_module = rel[:-3] if rel.endswith(".py") else rel
-    old_rel = f"old/{lib_module}@{_OPENAGENT_LIB_VERSION}"
+    old_rel = f"old/{lib_module}@{_OPENAGENT_LIB_VERSION}.py"
     return f"{_OPENAGENT_LIB_RAW_BASE.rstrip('/')}/{quote(old_rel, safe='/@')}"
 
 
@@ -255,7 +255,7 @@ class OpenAgent(
     ModuleBase,
 ):
     name = "OpenAgent"
-    version = "0.8.0-main.build:1040"
+    version = "0.8.0-main.build:1041"
     author = "@dev_dolbaeb && @Hairpin00"
     description = {
         "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",
@@ -1507,7 +1507,17 @@ class OpenAgent(
         raw = str(getattr(parser, "raw_args", "") or "")
         raw = re.sub(r"(?<!\S)--test(?:=\S+|\s+\S+)?", "", raw)
         raw = re.sub(r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", "", raw)
+        raw = re.sub(r"(?<!\S)(?:--flash|-f)(?=\s|$)", "", raw)
         return re.sub(r"\s+", " ", raw).strip()
+
+    def _oa_flash_arg(self, parser: Any | None) -> bool:
+        if parser is None:
+            return False
+        with contextlib.suppress(Exception):
+            if bool(parser.get_flag("flash")) or bool(parser.get_flag("f")):
+                return True
+        raw = str(getattr(parser, "raw_args", "") or "")
+        return bool(re.search(r"(?<!\S)(?:--flash|-f)(?=\s|$)", raw))
 
     def _oa_new_chat_arg(self, parser: Any | None) -> tuple[bool, str]:
         if parser is None:
@@ -1681,14 +1691,15 @@ class OpenAgent(
     @command(
         "oa",
         alias=["agent"],
-        doc_ru="<запрос> спросить ИИ агента; --new[=имя] новый чат; --chats меню; --clear очистить",
-        doc_en="<prompt> ask AI agent; --new[=name] new chat; --chats menu; --clear clear",
+        doc_ru="<запрос> спросить ИИ агента; --flash/-f быстрый режим; --new[=имя] новый чат; --chats меню; --clear очистить",
+        doc_en="<prompt> ask AI agent; --flash/-f fast mode; --new[=name] new chat; --chats menu; --clear clear",
     )
     async def cmd_oa(self, event: Event) -> None:
         parser = self._oa_arg_parser(event)
         prompt = self._oa_prompt_from_parser(parser) if parser is not None else self._args_raw(event)
         new_chat, new_chat_name = self._oa_new_chat_arg(parser)
         test_name = self._oa_test_name(parser)
+        flash_mode = self._oa_flash_arg(parser)
         if test_name:
             await self._run_oa_test(event, test_name)
             return
@@ -1778,6 +1789,7 @@ class OpenAgent(
                 attachments=attachments,
                 cancel_token=cancel_token,
                 started_at=started,
+                flash_mode=flash_mode,
             )
             self._last_request_at = time.time()
             elapsed = time.monotonic() - started
