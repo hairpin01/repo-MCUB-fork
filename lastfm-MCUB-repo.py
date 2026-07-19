@@ -24,10 +24,12 @@ from typing import Any
 
 import requests
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+from telethon.tl.types import InputMediaWebPage
 
 import utils
 from core.lib.loader.module_base import ModuleBase, callback, command
 from core.lib.loader.module_config import (
+    Boolean,
     Choice,
     ConfigValue,
     ModuleConfig,
@@ -363,6 +365,12 @@ class LastFmMod(ModuleBase):
             validator=Choice(choices=["default", "minimal", "clean"], default="default"),
         ),
         ConfigValue(
+            "inline_banner",
+            False,
+            description="Upload generated banner to x0.at and show it as webpage media",
+            validator=Boolean(default=False),
+        ),
+        ConfigValue(
             "fallback_cover",
             "https://lastfm.freetls.fastly.net/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562f.png",
             description="Fallback cover URL if track has no image",
@@ -409,6 +417,7 @@ class LastFmMod(ModuleBase):
             "rlyrics_text": "<b>🎵 Live lyrics:</b> {lastfm_song_artist} - {lastfm_song_name}\n\n{lyrics}",
             "rlyrics_current_emoji": "▶️",
             "banner_theme": "default",
+            "inline_banner": False,
             "lrclib_enabled": "true",
         }
         config_dict = await self.kernel.get_module_config(self.name, defaults)
@@ -434,6 +443,20 @@ class LastFmMod(ModuleBase):
         response = requests.get(url, timeout=20)
         response.raise_for_status()
         return response.content
+
+    @staticmethod
+    def _upload_banner_x0(file: io.BytesIO) -> str:
+        file.seek(0)
+        response = requests.post(
+            "https://x0.at",
+            files={"file": (getattr(file, "name", "banner.png"), file, "image/png")},
+            timeout=30,
+        )
+        response.raise_for_status()
+        banner_url = response.text.strip()
+        if not banner_url:
+            raise ValueError("x0.at returned empty banner URL")
+        return banner_url
 
     @staticmethod
     def _escape(value: Any) -> str:
@@ -776,8 +799,8 @@ class LastFmMod(ModuleBase):
                 cover_url=cover_url,
                 username=username,
             )
+            await status.edit(caption, parse_mode='html')
             if not cover_url:
-                await utils.answer(status, caption, as_html=True)
                 return
 
             cover_bytes = await asyncio.to_thread(self._get_bytes, cover_url)
@@ -803,6 +826,20 @@ class LastFmMod(ModuleBase):
                 progress=progress,
             )
             file = await asyncio.to_thread(getattr(banners, banner_version))
+
+            inline_banner = self.config.get("inline_banner")
+            if isinstance(inline_banner, str):
+                inline_banner = inline_banner.strip().lower() in {"1", "true", "yes", "on"}
+
+            if inline_banner:
+                banner_url = await asyncio.to_thread(self._upload_banner_x0, file)
+                await status.edit(
+                    caption,
+                    file=InputMediaWebPage(banner_url, optional=True),
+                    parse_mode='html',
+                    invert_media=True,
+                )
+                return
 
             await status.edit(caption, file=file, parse_mode='html')
         except Exception as e:
