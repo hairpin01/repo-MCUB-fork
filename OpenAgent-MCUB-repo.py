@@ -1,5 +1,5 @@
 # -- repo data --
-# scop: kernel min v1.4.2
+# scop: kernel min v1.4.4
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # -- end --
 # SPDX-License-Identifier: MIT
@@ -68,6 +68,9 @@ from core.lib.loader.module_config import (
     Choice,
     ConfigValue,
     Float,
+    Group,
+    Row,
+    Answer,
     Integer,
     List,
     ModuleConfig,
@@ -79,8 +82,10 @@ if TYPE_CHECKING:
     from core.lib.types import InlineMessage, Event, Kernel
 
 _OPENAGENT_LIB_VERSION = "0.8.0-main.build:1042"
-_OPENAGENT_LIB_FILES = ('__init__.py', 'mixins.py')
-_OPENAGENT_LIB_RAW_BASE = 'https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/lib/OpenAgent'
+_OPENAGENT_LIB_FILES = ("__init__.py", "mixins.py")
+_OPENAGENT_LIB_RAW_BASE = (
+    "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/lib/OpenAgent"
+)
 
 
 def _openagent_core_custom_dir() -> Path:
@@ -166,6 +171,12 @@ def _openagent_download_matching_lib(package_dir: Path, *, old: bool = False) ->
 def _openagent_ensure_custom_lib() -> None:
     package_dir = _openagent_core_custom_dir()
     if _openagent_lib_has_version(package_dir):
+        importlib.invalidate_caches()
+        for module_name in (
+            "core.lib.custom.OpenAgent",
+            "core.lib.custom.OpenAgent.mixins",
+        ):
+            sys.modules.pop(module_name, None)
         return
 
     latest_error: Exception | None = None
@@ -276,9 +287,9 @@ class OpenAgent(
             "disabled": "Provider {provider} is not available yet",
             "error": "OpenAgent error: {error}",
             "thinking_empty_text": "Модель ещё не думала.",
-            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
-            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
+            "thinking_template_default": '<blockquote><a href="tg://emoji?id=6010292571627069263">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href="tg://emoji?id=5404857686477015710">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>',
+            "request_label_default": '<a href="tg://emoji?id=6010352868672936598"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>',
+            "response_label_default": '<a href="tg://emoji?id=6010286885090368072"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>',
             "agent_log_label": "Agent Log",
             "status_thinking": "Думаю",
             "status_terminal": "Выполняю команду",
@@ -403,9 +414,9 @@ class OpenAgent(
             "disabled": "Provider {provider} is not available yet",
             "error": "OpenAgent error: {error}",
             "thinking_empty_text": "The model has not thought yet.",
-            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
-            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
+            "thinking_template_default": '<blockquote><a href="tg://emoji?id=6010292571627069263">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href="tg://emoji?id=5404857686477015710">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>',
+            "request_label_default": '<a href="tg://emoji?id=6010352868672936598"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>',
+            "response_label_default": '<a href="tg://emoji?id=6010286885090368072"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>',
             "agent_log_label": "Agent Log",
             "status_thinking": "Thinking",
             "status_terminal": "Running command",
@@ -530,9 +541,9 @@ class OpenAgent(
             "disabled": "провайдер {provider} пока в отпуске",
             "error": "OpenAgent словил прикол: {error}",
             "thinking_empty_text": "нейронка пока делает вид, что думает.",
-            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>варит ответ...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Промптик:</strong>",
-            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Ответик:</strong>",
+            "thinking_template_default": '<blockquote><a href="tg://emoji?id=6010292571627069263">😎</a> <u>{provider}/{model}</u> • <em>варит ответ...</em></blockquote >\n<blockquote><a href="tg://emoji?id=5404857686477015710">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>',
+            "request_label_default": '<a href="tg://emoji?id=6010352868672936598"><strong>🐈‍⬛</strong></a><strong></strong><strong> Промптик:</strong>',
+            "response_label_default": '<a href="tg://emoji?id=6010286885090368072"><strong>❌</strong></a><strong></strong><strong> Ответик:</strong>',
             "agent_log_label": "Лог движухи",
             "status_thinking": "Думаю, мамой клянусь",
             "status_terminal": "Терминалю",
@@ -657,9 +668,9 @@ class OpenAgent(
             "disabled": "provider {provider}: ENOSYS",
             "error": "openagent: {error}",
             "thinking_empty_text": "no reasoning frames in buffer.",
-            "thinking_template_default": "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>spawning response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            "request_label_default": "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> stdin:</strong>",
-            "response_label_default": "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> stdout:</strong>",
+            "thinking_template_default": '<blockquote><a href="tg://emoji?id=6010292571627069263">😎</a> <u>{provider}/{model}</u> • <em>spawning response...</em></blockquote >\n<blockquote><a href="tg://emoji?id=5404857686477015710">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>',
+            "request_label_default": '<a href="tg://emoji?id=6010352868672936598"><strong>🐈‍⬛</strong></a><strong></strong><strong> stdin:</strong>',
+            "response_label_default": '<a href="tg://emoji?id=6010286885090368072"><strong>❌</strong></a><strong></strong><strong> stdout:</strong>',
             "agent_log_label": "syslog",
             "status_thinking": "reasoning",
             "status_terminal": "exec command",
@@ -857,17 +868,45 @@ class OpenAgent(
         re.DOTALL | re.I,
     )
     MCUB_DOCS_URL = "https://x0.at/y2rb.md"
-    TOOL_CALL_RE = re.compile(r"<([a-z0-9._]+)([^>]*)>(.*?)</\1>|<([a-z0-9._]+)([^>]*)/?>", re.DOTALL | re.I)
+    TOOL_CALL_RE = re.compile(
+        r"<([a-z0-9._]+)([^>]*)>(.*?)</\1>|<([a-z0-9._]+)([^>]*)/?>", re.DOTALL | re.I
+    )
     TOOL_CALL_JSON_RE = re.compile(r"```tool_call\s*(.*?)```", re.DOTALL | re.I)
     TOOL_REGISTRY = (
         # Core/module-tied tools. Most tools should come from plugins.
         "thinking.note",
-        "skills.list", "skills.read", "skills.activate", "skills.import_md", "skills.export_md", "skills.save_from_ai", "skills.install", "skills.repo_list",
-        "code.generate_file", "code.generate_mcub_module", "code.choose_filename", "code.attach_result", "code.read_docs",
-        "context.remember", "context.clear", "context.regenerate", "context.reply_context", "context.media_context",
-        "todo.add", "todo.delete", "todo.edit", "todo.current", "todo.close", "todo.closeall", "todo.clear",
-        "utility.token_usage", "utility.placeholders", "utility.random_template", "utility.agent_log", "utility.error_file",
-        "utility.tool_help", "utility.list_tools",
+        "skills.list",
+        "skills.read",
+        "skills.activate",
+        "skills.import_md",
+        "skills.export_md",
+        "skills.save_from_ai",
+        "skills.install",
+        "skills.repo_list",
+        "code.generate_file",
+        "code.generate_mcub_module",
+        "code.choose_filename",
+        "code.attach_result",
+        "code.read_docs",
+        "context.remember",
+        "context.clear",
+        "context.regenerate",
+        "context.reply_context",
+        "context.media_context",
+        "todo.add",
+        "todo.delete",
+        "todo.edit",
+        "todo.current",
+        "todo.close",
+        "todo.closeall",
+        "todo.clear",
+        "utility.token_usage",
+        "utility.placeholders",
+        "utility.random_template",
+        "utility.agent_log",
+        "utility.error_file",
+        "utility.tool_help",
+        "utility.list_tools",
     )
     AGENT_MAX_STEPS = 15
     PREMIUM_EMOJIS = {
@@ -910,384 +949,462 @@ class OpenAgent(
         "num_9": '<tg-emoji emoji-id="5141137309999039199">9️⃣</tg-emoji>',
     }
     config = ModuleConfig(
-        ConfigValue(
-            "provider",
-            "openai",
-            description="Provider: openai, google, openrouter, groq, deepseek, xai, other",
-            validator=Choice(choices=list(PROVIDERS), default="openai"),
+        Group(
+            "Provider & Model 🧠",
+            [
+                ConfigValue(
+                    "provider",
+                    "openai",
+                    description="Provider: openai, google, openrouter, groq, deepseek, xai, other",
+                    validator=Choice(choices=list(PROVIDERS), default="openai"),
+                ),
+                ConfigValue(
+                    "api_key",
+                    "",
+                    description="API key for the selected provider",
+                    validator=Secret(default=""),
+                ),
+                ConfigValue(
+                    "model",
+                    "",
+                    description="Model name. Empty means provider default",
+                    validator=String(default=""),
+                ),
+                ConfigValue(
+                    "custom_base_url",
+                    "",
+                    description="Endpoint for provider=other, e.g. https://api.deepseek.com/v1",
+                    validator=String(default=""),
+                ),
+                ConfigValue(
+                    "system_prompt",
+                    "You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed.",
+                    description="System prompt for the agent",
+                    validator=String(
+                        default="You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed."
+                    ),
+                ),
+                ConfigValue(
+                    "temperature",
+                    0.7,
+                    description="Sampling temperature",
+                    validator=Float(default=0.7, min=0.0, max=2.0),
+                ),
+                ConfigValue(
+                    "max_tokens",
+                    1200,
+                    description="Maximum response tokens",
+                    validator=Integer(default=1200, min=64, max=32768),
+                ),
+                ConfigValue(
+                    "reasoning_effort",
+                    "off",
+                    description="Reasoning effort for models/providers that support it: off, low, medium, high, xhigh",
+                    validator=Choice(
+                        choices=["off", "low", "medium", "high", "xhigh"], default="off"
+                    ),
+                ),
+                ConfigValue(
+                    "timeout",
+                    180,
+                    description="HTTP timeout seconds for each provider request. Increase for slow reasoning/code tasks.",
+                    validator=Integer(default=180, min=10, max=600),
+                ),
+                ConfigValue(
+                    "provider_reconnect_attempts",
+                    5,
+                    description="Maximum reconnect attempts after provider API timeout",
+                    validator=Integer(default=5, min=0, max=5),
+                ),
+            ],
+            description="AI provider, credentials, model and request limits",
+            button_text="🧠 Provider",
+            key="provider_model",
         ),
-        ConfigValue(
-            "api_key",
-            "",
-            description="API key for the selected provider",
-            validator=Secret(default=""),
+        Group(
+            "Tools & Permissions 🛠",
+            [
+                ConfigValue(
+                    "terminal_enabled",
+                    True,
+                    description="Allow the agent to execute terminal commands",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "terminal_steps",
+                    3,
+                    description="Maximum terminal commands per request",
+                    validator=Integer(default=3, min=0, max=10),
+                ),
+                ConfigValue(
+                    "terminal_timeout",
+                    30,
+                    description="Terminal command timeout seconds",
+                    validator=Integer(default=30, min=3, max=120),
+                ),
+                ConfigValue(
+                    "web_search_enabled",
+                    True,
+                    description="Allow the agent to search the web",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "web_search_steps",
+                    3,
+                    description="Maximum web searches per request",
+                    validator=Integer(default=3, min=0, max=10),
+                ),
+                ConfigValue(
+                    "mcub_use",
+                    False,
+                    description="Allow the agent to execute MCUB userbot commands",
+                    validator=Boolean(default=False),
+                ),
+                ConfigValue(
+                    "mcub_steps",
+                    3,
+                    description="Maximum MCUB commands per request",
+                    validator=Integer(default=3, min=0, max=10),
+                ),
+                ConfigValue(
+                    "send_messages_enabled",
+                    True,
+                    description="Allow the agent to send messages as the userbot",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "send_message_steps",
+                    3,
+                    description="Maximum userbot messages sent per request",
+                    validator=Integer(default=3, min=0, max=10),
+                ),
+                ConfigValue(
+                    "create_chats_enabled",
+                    True,
+                    description="Allow the agent to create channels/groups",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "create_chat_steps",
+                    2,
+                    description="Maximum channels/groups created per request",
+                    validator=Integer(default=2, min=0, max=5),
+                ),
+                ConfigValue(
+                    "create_bots_enabled",
+                    True,
+                    description="Allow the agent to create Telegram bots via BotFather",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "create_bot_steps",
+                    1,
+                    description="Maximum Telegram bots created per request",
+                    validator=Integer(default=1, min=0, max=3),
+                ),
+                ConfigValue(
+                    "account_tools_enabled",
+                    True,
+                    description="Allow the agent to edit profile/join chats/read/search messages",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "account_tool_steps",
+                    5,
+                    description="Maximum account-level tools per request",
+                    validator=Integer(default=5, min=0, max=15),
+                ),
+                ConfigValue(
+                    "chat_management_enabled",
+                    True,
+                    description="Allow the agent to manage chats: mute, ban, promote, title, slowmode",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "chat_management_steps",
+                    5,
+                    description="Maximum chat-management tools per request",
+                    validator=Integer(default=5, min=0, max=15),
+                ),
+                ConfigValue(
+                    "media_max_bytes",
+                    8_000_000,
+                    description="Maximum replied media bytes sent to AI",
+                    validator=Integer(default=8_000_000, min=1024, max=25_000_000),
+                ),
+            ],
+            description="Terminal, web, MCUB and Telegram action limits",
+            button_text="🛠 Tools",
+            key="tools_permissions",
         ),
-        ConfigValue(
-            "model",
-            "",
-            description="Model name. Empty means provider default",
-            validator=String(default=""),
+        Group(
+            "Context & Memory 🧾",
+            [
+                ConfigValue(
+                    "context_enabled",
+                    True,
+                    description="Remember chat context between .oa requests",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "context_turns",
+                    10,
+                    description="How many user/assistant turns to remember per chat",
+                    validator=Integer(default=10, min=0, max=50),
+                ),
+                ConfigValue(
+                    "context_compaction_enabled",
+                    True,
+                    description="Automatically summarize old chat context when it becomes too large",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "context_compaction_chars",
+                    18000,
+                    description="Compact remembered chat context after this many characters",
+                    validator=Integer(default=18000, min=2000, max=200000),
+                ),
+                ConfigValue(
+                    "context_compaction_keep_turns",
+                    2,
+                    description="Recent user/assistant turns to keep verbatim after compaction",
+                    validator=Integer(default=2, min=0, max=10),
+                ),
+                ConfigValue(
+                    "context_compaction_max_tokens",
+                    900,
+                    description="Maximum tokens used for the compaction summary response",
+                    validator=Integer(default=900, min=128, max=4096),
+                ),
+                ConfigValue(
+                    "tool_memory_enabled",
+                    False,
+                    description="Remember concise notes from tool outputs for next requests",
+                    validator=Boolean(default=False),
+                ),
+                ConfigValue(
+                    "tool_memory_items",
+                    20,
+                    description="Maximum remembered tool notes per chat",
+                    validator=Integer(default=20, min=1, max=200),
+                ),
+                ConfigValue(
+                    "tool_memory_max_chars",
+                    500,
+                    description="Maximum characters per remembered tool note",
+                    validator=Integer(default=500, min=80, max=4000),
+                ),
+            ],
+            description="Chat memory, compaction and tool notes",
+            button_text="🧾 Context",
+            key="context_memory",
         ),
-        ConfigValue(
-            "custom_base_url",
-            "",
-            description="Endpoint for provider=other, e.g. https://api.deepseek.com/v1",
-            validator=String(default=""),
+        Row(),
+        Group(
+            "Templates & Display 🎨",
+            [
+                ConfigValue(
+                    "response_header",
+                    '<blockquote><a href="tg://emoji?id=6010179991944305029">☺️</a> <strong>OpenAgent</strong>: <a href="tg://emoji?id=5325872701032635449">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href="tg://emoji?id=5408994848084624514">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>',
+                    description="Final response header template. Placeholders: "
+                    + PLACEHOLDER_KEYS,
+                    validator=String(
+                        default='<blockquote><a href="tg://emoji?id=6010179991944305029">☺️</a> <strong>OpenAgent</strong>: <a href="tg://emoji?id=5325872701032635449">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href="tg://emoji?id=5408994848084624514">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>'
+                    ),
+                ),
+                ConfigValue(
+                    "request_label",
+                    '<a href="tg://emoji?id=6010352868672936598"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>',
+                    description="Request block label template. Placeholders: "
+                    + PLACEHOLDER_KEYS,
+                    validator=String(
+                        default='<a href="tg://emoji?id=6010352868672936598"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>'
+                    ),
+                ),
+                ConfigValue(
+                    "response_label",
+                    '<a href="tg://emoji?id=6010286885090368072"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>',
+                    description="Response block label template. Placeholders: "
+                    + PLACEHOLDER_KEYS,
+                    validator=String(
+                        default='<a href="tg://emoji?id=6010286885090368072"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>'
+                    ),
+                ),
+                ConfigValue(
+                    "thinking_template",
+                    '<blockquote><a href="tg://emoji?id=6010292571627069263">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href="tg://emoji?id=5404857686477015710">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>',
+                    description="Initial loading/thinking message template. Placeholders: "
+                    + PLACEHOLDER_KEYS,
+                    validator=String(
+                        default='<blockquote><a href="tg://emoji?id=6010292571627069263">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href="tg://emoji?id=5404857686477015710">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>'
+                    ),
+                ),
+                ConfigValue(
+                    "tool_display_template",
+                    '<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href="tg://emoji?id=6010570945637392851">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href="tg://emoji?id=5310041868191407556">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href="tg://emoji?id=6012361831035705571">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>',
+                    description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_state}, {tool_state_emoji}, {tool_state_icon}, {tool_state_emoji_html}, {tool_state_icon_html}, {tool_running_emoji}, {tool_running_icon}, {tool_running_emoji_html}, {tool_running_icon_html}, {tool_done_emoji}, {tool_done_icon}, {tool_done_emoji_html}, {tool_done_icon_html}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General placeholders: "
+                    + PLACEHOLDER_KEYS,
+                    validator=String(
+                        default='<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href="tg://emoji?id=6010570945637392851">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href="tg://emoji?id=5310041868191407556">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href="tg://emoji?id=6012361831035705571">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>'
+                    ),
+                ),
+                ConfigValue(
+                    "tool_status_emojis",
+                    "thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠",
+                    description="Custom emoji/icon map for {status_emoji}/{status_icon}. Format: group_or_tool=emoji per line. Tool-specific keys like terminal.run or thinking.note override groups like terminal/thinking. Premium emoji HTML is allowed via {status_emoji_html}/{status_icon_html}.",
+                    validator=String(
+                        default="thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠"
+                    ),
+                ),
+                ConfigValue(
+                    "tool_display_max_chars",
+                    1200,
+                    description="Maximum chars from current tool input shown in status form",
+                    validator=Integer(default=1200, min=0, max=4000),
+                ),
+                ConfigValue(
+                    "tool_display_log_lines",
+                    8,
+                    description="How many recent tool names to show in status form",
+                    validator=Integer(default=8, min=0, max=30),
+                ),
+                ConfigValue(
+                    "thinking_display_limit",
+                    3,
+                    description="How many recent thinking.note entries to show in {thinking}",
+                    validator=Integer(default=3, min=0, max=20),
+                ),
+                ConfigValue(
+                    "thinking_empty_text",
+                    "Модель ещё не думала.",
+                    description="Text for {thinking} when no thinking.note entries exist",
+                    validator=String(default="Модель ещё не думала."),
+                ),
+                ConfigValue(
+                    "thinking_bullet",
+                    "•",
+                    description="Prefix marker for each thinking.note line in {thinking}. Empty disables the marker",
+                    validator=String(default="•"),
+                ),
+                ConfigValue(
+                    "random_strings",
+                    ["Thinking...", "Думаю...", "Генерирую..."],
+                    description="Random lines for {random}",
+                    validator=List(
+                        default=["Thinking...", "Думаю...", "Генерирую..."],
+                        item_type=str,
+                    ),
+                ),
+                ConfigValue(
+                    "todo_status_emojis",
+                    "pending=...\nopen=>>>\nclosed=---",
+                    description="State markers for {todo}. Format: pending=..., open=>>>, closed=---",
+                    validator=String(default="pending=...\nopen=>>>\nclosed=---"),
+                ),
+                ConfigValue(
+                    "placeholders",
+                    "",
+                    description="Available OpenAgent placeholders (auto-generated)",
+                    validator=String(default=""),
+                ),
+            ],
+            description="Response headers, labels, thinking and tool status templates",
+            button_text="🎨 Display",
+            key="templates_display",
         ),
-        ConfigValue(
-            "system_prompt",
-            "You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed.",
-            description="System prompt for the agent",
-            validator=String(
-                default="You are OpenAgent inside a Telegram userbot. Help the user directly. You may inspect the local workspace through terminal commands when needed."
-            ),
+        Group(
+            "Repo Context & Skills 📚",
+            [
+                ConfigValue(
+                    "repo_context_enabled",
+                    True,
+                    description="Inject local workspace snapshot into system prompt",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "repo_context_max_chars",
+                    7000,
+                    description="Maximum chars used for repo context in system prompt",
+                    validator=Integer(default=7000, min=500, max=30000),
+                ),
+                ConfigValue(
+                    "skills_enabled",
+                    True,
+                    description="Enable loading OpenAgent skills into the system prompt",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "skills_trigger_mode",
+                    "auto",
+                    description="When to load skills: auto = only on keyword match, always = every request, off = never",
+                    validator=String(default="auto"),
+                ),
+                ConfigValue(
+                    "skill_repo_url",
+                    "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills",
+                    description="Base URL for installable OpenAgent skills repository",
+                    validator=String(
+                        default="https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills"
+                    ),
+                ),
+            ],
+            description="Workspace context and OpenAgent skills loading",
+            button_text="📚 Skills",
+            key="repo_skills",
         ),
-        ConfigValue(
-            "temperature",
-            0.7,
-            description="Sampling temperature",
-            validator=Float(default=0.7, min=0.0, max=2.0),
+        Group(
+            "Tool Confirmations 🛡",
+            [
+                ConfigValue(
+                    "tool_confirmation_enabled",
+                    True,
+                    description="Ask for confirmation before tools that can change files, chats, account state, or run commands",
+                    validator=Boolean(default=True),
+                ),
+                ConfigValue(
+                    "tool_confirmation_mode",
+                    "medium",
+                    description="How often to ask before tools: low = only critical/destructive, medium = write/actions, high = almost every non-read tool",
+                    validator=Choice(
+                        choices=["low", "medium", "high"], default="medium"
+                    ),
+                ),
+                ConfigValue(
+                    "tool_confirmation_template",
+                    '<blockquote><a href="tg://emoji?id=6010201728773790293">😈</a> Continue?\n<a href="tg://emoji?id=6012317326584583729">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href="tg://emoji?id=6010394680179562842">😶</a> <b>What will be completed</b>\n<a href="tg://emoji?id=6010292550152230657">☀️</a> <code>{value}</code></blockquote>',
+                    description="Confirmation form template. Placeholders: {tool}, {value}, {elapsed}, {elapsed_line}",
+                    validator=String(
+                        default='<blockquote><a href="tg://emoji?id=6010201728773790293">😈</a> Continue?\n<a href="tg://emoji?id=6012317326584583729">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href="tg://emoji?id=6010394680179562842">😶</a> <b>What will be completed</b>\n<a href="tg://emoji?id=6010292550152230657">☀️</a> <code>{value}</code></blockquote>'
+                    ),
+                ),
+                ConfigValue(
+                    "tool_confirmation_yes_text",
+                    "Выполнить",
+                    description="Confirm button text for dangerous tools",
+                    validator=String(default="Выполнить"),
+                ),
+                ConfigValue(
+                    "tool_confirmation_no_text",
+                    "Не сейчас",
+                    description="Cancel button text for dangerous tools",
+                    validator=String(default="Не сейчас"),
+                ),
+                ConfigValue(
+                    "tool_confirmation_timeout",
+                    900,
+                    description="Seconds to wait for dangerous tool confirmation",
+                    validator=Integer(default=900, min=10, max=3600),
+                ),
+            ],
+            description="Confirmation policy and prompt/button templates",
+            button_text="🛡 Confirm",
+            key="confirmations",
         ),
-        ConfigValue(
-            "max_tokens",
-            1200,
-            description="Maximum response tokens",
-            validator=Integer(default=1200, min=64, max=32768),
-        ),
-        ConfigValue(
-            "reasoning_effort",
-            "off",
-            description="Reasoning effort for models/providers that support it: off, low, medium, high, xhigh",
-            validator=Choice(choices=["off", "low", "medium", "high", "xhigh"], default="off"),
-        ),
-        ConfigValue(
-            "timeout",
-            180,
-            description="HTTP timeout seconds for each provider request. Increase for slow reasoning/code tasks.",
-            validator=Integer(default=180, min=10, max=600),
-        ),
-        ConfigValue(
-            "provider_reconnect_attempts",
-            5,
-            description="Maximum reconnect attempts after provider API timeout",
-            validator=Integer(default=5, min=0, max=5),
-        ),
-        ConfigValue(
-            "terminal_enabled",
-            True,
-            description="Allow the agent to execute terminal commands",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "terminal_steps",
-            3,
-            description="Maximum terminal commands per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "terminal_timeout",
-            30,
-            description="Terminal command timeout seconds",
-            validator=Integer(default=30, min=3, max=120),
-        ),
-        ConfigValue(
-            "web_search_enabled",
-            True,
-            description="Allow the agent to search the web",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "web_search_steps",
-            3,
-            description="Maximum web searches per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "mcub_use",
-            False,
-            description="Allow the agent to execute MCUB userbot commands",
-            validator=Boolean(default=False),
-        ),
-        ConfigValue(
-            "mcub_steps",
-            3,
-            description="Maximum MCUB commands per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "send_messages_enabled",
-            True,
-            description="Allow the agent to send messages as the userbot",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "send_message_steps",
-            3,
-            description="Maximum userbot messages sent per request",
-            validator=Integer(default=3, min=0, max=10),
-        ),
-        ConfigValue(
-            "create_chats_enabled",
-            True,
-            description="Allow the agent to create channels/groups",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "create_chat_steps",
-            2,
-            description="Maximum channels/groups created per request",
-            validator=Integer(default=2, min=0, max=5),
-        ),
-        ConfigValue(
-            "create_bots_enabled",
-            True,
-            description="Allow the agent to create Telegram bots via BotFather",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "create_bot_steps",
-            1,
-            description="Maximum Telegram bots created per request",
-            validator=Integer(default=1, min=0, max=3),
-        ),
-        ConfigValue(
-            "account_tools_enabled",
-            True,
-            description="Allow the agent to edit profile/join chats/read/search messages",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "account_tool_steps",
-            5,
-            description="Maximum account-level tools per request",
-            validator=Integer(default=5, min=0, max=15),
-        ),
-        ConfigValue(
-            "chat_management_enabled",
-            True,
-            description="Allow the agent to manage chats: mute, ban, promote, title, slowmode",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "chat_management_steps",
-            5,
-            description="Maximum chat-management tools per request",
-            validator=Integer(default=5, min=0, max=15),
-        ),
-        ConfigValue(
-            "media_max_bytes",
-            8_000_000,
-            description="Maximum replied media bytes sent to AI",
-            validator=Integer(default=8_000_000, min=1024, max=25_000_000),
-        ),
-        ConfigValue(
-            "context_enabled",
-            True,
-            description="Remember chat context between .oa requests",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "context_turns",
-            10,
-            description="How many user/assistant turns to remember per chat",
-            validator=Integer(default=10, min=0, max=50),
-        ),
-        ConfigValue(
-            "context_compaction_enabled",
-            True,
-            description="Automatically summarize old chat context when it becomes too large",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "context_compaction_chars",
-            18000,
-            description="Compact remembered chat context after this many characters",
-            validator=Integer(default=18000, min=2000, max=200000),
-        ),
-        ConfigValue(
-            "context_compaction_keep_turns",
-            2,
-            description="Recent user/assistant turns to keep verbatim after compaction",
-            validator=Integer(default=2, min=0, max=10),
-        ),
-        ConfigValue(
-            "context_compaction_max_tokens",
-            900,
-            description="Maximum tokens used for the compaction summary response",
-            validator=Integer(default=900, min=128, max=4096),
-        ),
-        ConfigValue(
-            "tool_memory_enabled",
-            False,
-            description="Remember concise notes from tool outputs for next requests",
-            validator=Boolean(default=False),
-        ),
-        ConfigValue(
-            "tool_memory_items",
-            20,
-            description="Maximum remembered tool notes per chat",
-            validator=Integer(default=20, min=1, max=200),
-        ),
-        ConfigValue(
-            "tool_memory_max_chars",
-            500,
-            description="Maximum characters per remembered tool note",
-            validator=Integer(default=500, min=80, max=4000),
-        ),
-        ConfigValue(
-            "response_header",
-            "<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>",
-            description="Final response header template. Placeholders: " + PLACEHOLDER_KEYS,
-            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010179991944305029\">☺️</a> <strong>OpenAgent</strong>: <a href=\"tg://emoji?id=5325872701032635449\">⏳</a>  <em>{elapsed}</em>s\n• <u>{provider}/{model}</u>  •  <code>{reasoning_effort}</code>\n| | | | | | | | | | | | | | | | | | | | | | | | | | |\n<a href=\"tg://emoji?id=5408994848084624514\">💸</a> <strong>in</strong> <em>{input_tokens}</em>, <strong>out</strong> <em>{output_tokens}</em> | <b>total</b>\n<i>{total_tokens}</i> | <strong>tool use:</strong> <em>{tool_count}</em></blockquote>\n<blockquote expandable><i>{thinking}</i></blockquote>"),
-        ),
-        ConfigValue(
-            "request_label",
-            "<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>",
-            description="Request block label template. Placeholders: " + PLACEHOLDER_KEYS,
-            validator=String(default="<a href=\"tg://emoji?id=6010352868672936598\"><strong>🐈‍⬛</strong></a><strong></strong><strong> Prompt:</strong>"),
-        ),
-        ConfigValue(
-            "response_label",
-            "<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>",
-            description="Response block label template. Placeholders: " + PLACEHOLDER_KEYS,
-            validator=String(default="<a href=\"tg://emoji?id=6010286885090368072\"><strong>❌</strong></a><strong></strong><strong> Answer:</strong>"),
-        ),
-        ConfigValue(
-            "thinking_template",
-            "<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>",
-            description="Initial loading/thinking message template. Placeholders: " + PLACEHOLDER_KEYS,
-            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010292571627069263\">😎</a> <u>{provider}/{model}</u> • <em>prepares the response...</em></blockquote >\n<blockquote><a href=\"tg://emoji?id=5404857686477015710\">🔄</a><strong><em> {random}</em></strong><em></em></blockquote>"),
-        ),
-        ConfigValue(
-            "tool_display_template",
-            "<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>",
-            description="Tool execution status template. Raw: {tool}, {title}, {value}, {log}, {step}. Semantic: {round}, {round_total}, {progress_bar}, {progress_percent}, {status_emoji}, {status_icon}, {status_emoji_html}, {status_icon_html}, {status_text}, {tool_state}, {tool_state_emoji}, {tool_state_icon}, {tool_state_emoji_html}, {tool_state_icon_html}, {tool_running_emoji}, {tool_running_icon}, {tool_running_emoji_html}, {tool_running_icon_html}, {tool_done_emoji}, {tool_done_icon}, {tool_done_emoji_html}, {tool_done_icon_html}, {tool_group}, {tool_short}, {tool_input}, {tool_input_block}, {thinking_line}, {thinking_block}, {log_lines}, {log_block}, {log_count}, {elapsed_line}, {token_line}, {model_line}, {activity_line}. General placeholders: " + PLACEHOLDER_KEYS,
-            validator=String(
-                default="<blockquote expandable><i>{thinking_line}</i></blockquote>\n<blockquote expandable><strong>┌|</strong> {tool_state_emoji_html} {status_emoji_html} <em>{status_text}</em> <code>{tool}</code>\n<strong>└|</strong> <a href=\"tg://emoji?id=6010570945637392851\">🥳</a>  <b>Round:</b> <code>{round}/{round_total}</code> • <b>Reasoning:</b>\n<code>{reasoning_effort}</code>\n</blockquote><blockquote><a href=\"tg://emoji?id=5310041868191407556\">🩸</a> <strong>{activity_line}</strong></blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6012361831035705571\">😪</a> <strong>Log tools</strong>\n<code>{log_lines}</code></blockquote>"
-            ),
-        ),
-        ConfigValue(
-            "tool_status_emojis",
-            "thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠",
-            description="Custom emoji/icon map for {status_emoji}/{status_icon}. Format: group_or_tool=emoji per line. Tool-specific keys like terminal.run or thinking.note override groups like terminal/thinking. Premium emoji HTML is allowed via {status_emoji_html}/{status_icon_html}.",
-            validator=String(default="thinking=❔\nterminal=🖥\nweb=🌐\nfile=📦\nmcub=🧲\nmessage=💬\ndialog=🗂\nchat=🐈‍⬛\nmoderation=🛡\nprofile=👤\ncontacts=👥\ncreation=✨\nskills=🧠\ncode=🧬\ncontext=🧾\nutility=🛠\ndefault=🛠"),
-        ),
-        ConfigValue(
-            "tool_display_max_chars",
-            1200,
-            description="Maximum chars from current tool input shown in status form",
-            validator=Integer(default=1200, min=0, max=4000),
-        ),
-        ConfigValue(
-            "tool_display_log_lines",
-            8,
-            description="How many recent tool names to show in status form",
-            validator=Integer(default=8, min=0, max=30),
-        ),
-        ConfigValue(
-            "thinking_display_limit",
-            3,
-            description="How many recent thinking.note entries to show in {thinking}",
-            validator=Integer(default=3, min=0, max=20),
-        ),
-        ConfigValue(
-            "thinking_empty_text",
-            "Модель ещё не думала.",
-            description="Text for {thinking} when no thinking.note entries exist",
-            validator=String(default="Модель ещё не думала."),
-        ),
-        ConfigValue(
-            "thinking_bullet",
-            "•",
-            description="Prefix marker for each thinking.note line in {thinking}. Empty disables the marker",
-            validator=String(default="•"),
-        ),
-        ConfigValue(
-            "random_strings",
-            ["Thinking...", "Думаю...", "Генерирую..."],
-            description="Random lines for {random}",
-            validator=List(default=["Thinking...", "Думаю...", "Генерирую..."], item_type=str),
-        ),
-        ConfigValue(
-            "todo_status_emojis",
-            "pending=...\nopen=>>>\nclosed=---",
-            description="State markers for {todo}. Format: pending=..., open=>>>, closed=---",
-            validator=String(default="pending=...\nopen=>>>\nclosed=---"),
-        ),
-        ConfigValue(
-            "placeholders",
-            "",
-            description="Available OpenAgent placeholders (auto-generated)",
-            validator=String(default=""),
-        ),
-        ConfigValue(
-            "repo_context_enabled",
-            True,
-            description="Inject local workspace snapshot into system prompt",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "repo_context_max_chars",
-            7000,
-            description="Maximum chars used for repo context in system prompt",
-            validator=Integer(default=7000, min=500, max=30000),
-        ),
-        ConfigValue(
-            "skills_enabled",
-            True,
-            description="Enable loading OpenAgent skills into the system prompt",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "skills_trigger_mode",
-            "auto",
-            description="When to load skills: auto = only on keyword match, always = every request, off = never",
-            validator=String(default="auto"),
-        ),
-        ConfigValue(
-            "skill_repo_url",
-            "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills",
-            description="Base URL for installable OpenAgent skills repository",
-            validator=String(default="https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/OpenAgent/skills"),
-        ),
-        ConfigValue(
-            "tool_confirmation_enabled",
-            True,
-            description="Ask for confirmation before tools that can change files, chats, account state, or run commands",
-            validator=Boolean(default=True),
-        ),
-        ConfigValue(
-            "tool_confirmation_mode",
-            "medium",
-            description="How often to ask before tools: low = only critical/destructive, medium = write/actions, high = almost every non-read tool",
-            validator=Choice(choices=["low", "medium", "high"], default="medium"),
-        ),
-        ConfigValue(
-            "tool_confirmation_template",
-            "<blockquote><a href=\"tg://emoji?id=6010201728773790293\">😈</a> Continue?\n<a href=\"tg://emoji?id=6012317326584583729\">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6010394680179562842\">😶</a> <b>What will be completed</b>\n<a href=\"tg://emoji?id=6010292550152230657\">☀️</a> <code>{value}</code></blockquote>",
-            description="Confirmation form template. Placeholders: {tool}, {value}, {elapsed}, {elapsed_line}",
-            validator=String(default="<blockquote><a href=\"tg://emoji?id=6010201728773790293\">😈</a> Continue?\n<a href=\"tg://emoji?id=6012317326584583729\">😐</a> Tool: {tool} • {elapsed}s</blockquote>\n<blockquote expandable><a href=\"tg://emoji?id=6010394680179562842\">😶</a> <b>What will be completed</b>\n<a href=\"tg://emoji?id=6010292550152230657\">☀️</a> <code>{value}</code></blockquote>"),
-        ),
-        ConfigValue(
-            "tool_confirmation_yes_text",
-            "Выполнить",
-            description="Confirm button text for dangerous tools",
-            validator=String(default="Выполнить"),
-        ),
-        ConfigValue(
-            "tool_confirmation_no_text",
-            "Не сейчас",
-            description="Cancel button text for dangerous tools",
-            validator=String(default="Не сейчас"),
-        ),
-        ConfigValue(
-            "tool_confirmation_timeout",
-            900,
-            description="Seconds to wait for dangerous tool confirmation",
-            validator=Integer(default=900, min=10, max=3600),
-        ),
+        Row(),
+        Answer('❔ About', 'AI agent in userbot with refreshed tool architecture')
     )
     SESSION_LIMIT = 20
+
     class _MCUBEvent:
         def __init__(self, outer: "OpenAgent", source_event: Any, text: str) -> None:
             self._outer = outer
@@ -1309,17 +1426,23 @@ class OpenAgent(
             self.no_add_args_to_input = False
             self._outputs: list[str] = []
 
-        async def edit(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
+        async def edit(
+            self, text: str, *args: Any, **kwargs: Any
+        ) -> "OpenAgent._MCUBEvent":
             await asyncio.sleep(0)
             self._outputs.append(str(text))
             return self
 
-        async def reply(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
+        async def reply(
+            self, text: str, *args: Any, **kwargs: Any
+        ) -> "OpenAgent._MCUBEvent":
             await asyncio.sleep(0)
             self._outputs.append(str(text))
             return self
 
-        async def respond(self, text: str, *args: Any, **kwargs: Any) -> "OpenAgent._MCUBEvent":
+        async def respond(
+            self, text: str, *args: Any, **kwargs: Any
+        ) -> "OpenAgent._MCUBEvent":
             await asyncio.sleep(0)
             self._outputs.append(str(text))
             return self
@@ -1348,10 +1471,19 @@ class OpenAgent(
             return "\n\n".join(self._outputs).strip()
 
     @callback(ttl=900)
-    async def _open_sessions_panel(self, call: InlineMessage, chat_id: int | None = None) -> None:
-        cid = int(chat_id or getattr(call, "chat_id", 0) or getattr(call, "_openagent_source_chat_id", 0) or 0)
+    async def _open_sessions_panel(
+        self, call: InlineMessage, chat_id: int | None = None
+    ) -> None:
+        cid = int(
+            chat_id
+            or getattr(call, "chat_id", 0)
+            or getattr(call, "_openagent_source_chat_id", 0)
+            or 0
+        )
         if not cid:
-            await call.answer(self.strings("error", error="chat_id is missing"), alert=True)
+            await call.answer(
+                self.strings("error", error="chat_id is missing"), alert=True
+            )
             return
         await self._show_sessions_panel(call, cid)
 
@@ -1369,7 +1501,9 @@ class OpenAgent(
         await self._reply_text(
             call,
             answer,
-            title=self._response_title(0.0, tool_count=0, thinking_notes=thinking_notes),
+            title=self._response_title(
+                0.0, tool_count=0, thinking_notes=thinking_notes
+            ),
             prompt=prompt,
             thinking_notes=thinking_notes,
             buttons=self._final_buttons(
@@ -1483,12 +1617,18 @@ class OpenAgent(
                 future.set_result(bool(approved))
         with contextlib.suppress(Exception):
             await call.answer(
-                self.strings("tool_confirmation_approved") if approved else self.strings("cancelled"),
+                (
+                    self.strings("tool_confirmation_approved")
+                    if approved
+                    else self.strings("cancelled")
+                ),
                 alert=False,
             )
 
     @callback(ttl=900)
-    async def _activate_inline_status(self, call: InlineMessage, token: str | None = None) -> None:
+    async def _activate_inline_status(
+        self, call: InlineMessage, token: str | None = None
+    ) -> None:
         if token:
             future = self._inline_status_waiters.get(token)
             if future is not None and not future.done():
@@ -1506,7 +1646,9 @@ class OpenAgent(
             return ""
         raw = str(getattr(parser, "raw_args", "") or "")
         raw = re.sub(r"(?<!\S)--test(?:=\S+|\s+\S+)?", "", raw)
-        raw = re.sub(r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", "", raw)
+        raw = re.sub(
+            r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", "", raw
+        )
         raw = re.sub(r"(?<!\S)(?:--flash|-f)(?=\s|$)", "", raw)
         return re.sub(r"\s+", " ", raw).strip()
 
@@ -1523,7 +1665,9 @@ class OpenAgent(
         if parser is None:
             return False, ""
         raw = str(getattr(parser, "raw_args", "") or "")
-        match = re.search(r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", raw)
+        match = re.search(
+            r"(?<!\S)--new(?:=(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|\S*))?(?=\s|$)", raw
+        )
         if not match:
             return False, ""
         token = match.group(0)
@@ -1531,7 +1675,7 @@ class OpenAgent(
             return True, ""
         name = token.split("=", 1)[1].strip()
         if len(name) >= 2 and (
-            (name[0] == name[-1] and name[0] in {'\"', "'"})
+            (name[0] == name[-1] and name[0] in {'"', "'"})
             or (name[0] == "{" and name[-1] == "}")
         ):
             name = name[1:-1]
@@ -1555,14 +1699,28 @@ class OpenAgent(
         async def no_sleep(_delay: float) -> None:
             return None
 
-        async def fake_show(_event: Any, title: str, value: str, _log: list[str], tool_name: str = "", **_kwargs: Any) -> None:
+        async def fake_show(
+            _event: Any,
+            title: str,
+            value: str,
+            _log: list[str],
+            tool_name: str = "",
+            **_kwargs: Any,
+        ) -> None:
             statuses.append(f"{title}:{tool_name}:{value}")
 
         try:
             asyncio.sleep = no_sleep
             self._show_agent_action = fake_show  # type: ignore[method-assign]
             if name == "reconnect":
-                async def fake_once(_provider: str, _messages: list[dict[str, Any]], _api_key: str, *, max_tokens_override: int | None = None) -> str:
+
+                async def fake_once(
+                    _provider: str,
+                    _messages: list[dict[str, Any]],
+                    _api_key: str,
+                    *,
+                    max_tokens_override: int | None = None,
+                ) -> str:
                     calls.append(1)
                     if len(calls) <= 5:
                         raise RuntimeError("Provider request timed out after 1s")
@@ -1570,7 +1728,13 @@ class OpenAgent(
 
                 self._ask_provider_once = fake_once  # type: ignore[method-assign]
                 result = await self._ask_provider_with_reconnect(
-                    "openai", [], "test-key", status_event=event, agent_log=log, started_at=time.monotonic(), thinking_notes=[]
+                    "openai",
+                    [],
+                    "test-key",
+                    status_event=event,
+                    agent_log=log,
+                    started_at=time.monotonic(),
+                    thinking_notes=[],
                 )
                 text = (
                     "Reconnect test OK\n"
@@ -1580,16 +1744,31 @@ class OpenAgent(
                     f"log={', '.join(log)}"
                 )
             elif name == "timeout_provider":
-                max_reconnects = max(0, min(int(self.config.get("provider_reconnect_attempts", 5) or 0), 5))
+                max_reconnects = max(
+                    0,
+                    min(int(self.config.get("provider_reconnect_attempts", 5) or 0), 5),
+                )
 
-                async def fake_once_timeout(_provider: str, _messages: list[dict[str, Any]], _api_key: str, *, max_tokens_override: int | None = None) -> str:
+                async def fake_once_timeout(
+                    _provider: str,
+                    _messages: list[dict[str, Any]],
+                    _api_key: str,
+                    *,
+                    max_tokens_override: int | None = None,
+                ) -> str:
                     calls.append(1)
                     raise RuntimeError("Provider request timed out after 1s")
 
                 self._ask_provider_once = fake_once_timeout  # type: ignore[method-assign]
                 try:
                     await self._ask_provider_with_reconnect(
-                        "openai", [], "test-key", status_event=event, agent_log=log, started_at=time.monotonic(), thinking_notes=[]
+                        "openai",
+                        [],
+                        "test-key",
+                        status_event=event,
+                        agent_log=log,
+                        started_at=time.monotonic(),
+                        thinking_notes=[],
                     )
                 except Exception as exc:
                     text = (
@@ -1627,7 +1806,9 @@ class OpenAgent(
         if raw.strip():
             payload = raw.strip()
             if not payload.startswith("{"):
-                raise ValueError("Pass a JSON object after .oaimport or reply to openagent-settings.json")
+                raise ValueError(
+                    "Pass a JSON object after .oaimport or reply to openagent-settings.json"
+                )
             return payload
         reply = await event.get_reply_message()
         if not reply:
@@ -1645,7 +1826,9 @@ class OpenAgent(
             payload = text.strip()
             if payload.startswith("{"):
                 return payload
-            raise ValueError("Replied message is not OpenAgent settings JSON. Reply to openagent-settings.json or JSON text.")
+            raise ValueError(
+                "Replied message is not OpenAgent settings JSON. Reply to openagent-settings.json or JSON text."
+            )
         data = await reply.download_media(file=bytes)
         if data:
             payload = data.decode("utf-8", errors="replace").strip()
@@ -1666,7 +1849,9 @@ class OpenAgent(
             raise ValueError("settings object expected")
         return settings
 
-    async def _apply_import_config(self, settings: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+    async def _apply_import_config(
+        self, settings: dict[str, Any]
+    ) -> tuple[list[str], list[str], list[str]]:
         blocked = self._config_export_blocked_keys()
         known = set(self.config.keys())
         applied: list[str] = []
@@ -1696,25 +1881,35 @@ class OpenAgent(
     )
     async def cmd_oa(self, event: Event) -> None:
         parser = self._oa_arg_parser(event)
-        prompt = self._oa_prompt_from_parser(parser) if parser is not None else self._args_raw(event)
+        prompt = (
+            self._oa_prompt_from_parser(parser)
+            if parser is not None
+            else self._args_raw(event)
+        )
         new_chat, new_chat_name = self._oa_new_chat_arg(parser)
         test_name = self._oa_test_name(parser)
         flash_mode = self._oa_flash_arg(parser)
         if test_name:
             await self._run_oa_test(event, test_name)
             return
-        if prompt.strip() == "--clear" or (parser is not None and parser.get_flag("clear")):
+        if prompt.strip() == "--clear" or (
+            parser is not None and parser.get_flag("clear")
+        ):
             chat_id = getattr(event, "chat_id", None)
             if chat_id is not None:
                 session = self._get_active_session(int(chat_id))
                 session.messages.clear()
                 self._tool_memory.pop(int(chat_id), None)
                 self._touch_session(session)
-                await self.edit(event, html.escape(self.strings("context_cleared")), as_html=True)
+                await self.edit(
+                    event, html.escape(self.strings("context_cleared")), as_html=True
+                )
             else:
                 await self.edit(event, self.strings("need_text"))
             return
-        if prompt.strip() == "--chats" or (parser is not None and parser.get_flag("chats")):
+        if prompt.strip() == "--chats" or (
+            parser is not None and parser.get_flag("chats")
+        ):
             chat_id = getattr(event, "chat_id", None)
             if chat_id is not None:
                 await self._show_sessions_panel(event, int(chat_id), force_inline=True)
@@ -1728,7 +1923,9 @@ class OpenAgent(
             chat_id = getattr(event, "chat_id", None)
             if chat_id is not None:
                 if new_chat:
-                    session = self._new_session(int(chat_id), name=new_chat_name or None)
+                    session = self._new_session(
+                        int(chat_id), name=new_chat_name or None
+                    )
                     self.session_manager.set_preference(int(chat_id), "continue")
                     await self._show_sessions_panel(
                         event,
@@ -1758,7 +1955,11 @@ class OpenAgent(
                     self._fresh_session(int(chat_id))
                 elif pref == "ask" and len(sessions) > 1:
                     prompt_token = self._store_pending_prompt(
-                        int(chat_id), prompt, full_prompt, attachments, source_event=event
+                        int(chat_id),
+                        prompt,
+                        full_prompt,
+                        attachments,
+                        source_event=event,
                     )
                     await self._show_oa_choice_panel(event, int(chat_id), prompt_token)
                     return
@@ -1767,7 +1968,10 @@ class OpenAgent(
         self._set_placeholder_context(event, cancel_token)
         self.log.debug(
             "OA cmd_oa: chat_id=%s prompt_len=%d reply=%s attachments=%d",
-            chat_id, len(prompt), bool(reply_context), len(attachments or []),
+            chat_id,
+            len(prompt),
+            bool(reply_context),
+            len(attachments or []),
         )
         loading = await self._start_inline_status(
             event,
@@ -1793,7 +1997,13 @@ class OpenAgent(
             )
             self._last_request_at = time.time()
             elapsed = time.monotonic() - started
-            self._remember_context(getattr(event, "chat_id", None), full_prompt, answer, tool_trace, thinking_notes)
+            self._remember_context(
+                getattr(event, "chat_id", None),
+                full_prompt,
+                answer,
+                tool_trace,
+                thinking_notes,
+            )
             await self._reply_text(
                 loading or event,
                 answer,
@@ -1830,7 +2040,11 @@ class OpenAgent(
                 source="OpenAgent",
             )
 
-    @command("oaexport", doc_ru="экспорт настроек OpenAgent без секретов", doc_en="export OpenAgent settings without secrets")
+    @command(
+        "oaexport",
+        doc_ru="экспорт настроек OpenAgent без секретов",
+        doc_en="export OpenAgent settings without secrets",
+    )
     async def cmd_oaexport(self, event: Event) -> None:
         payload = {
             "name": "OpenAgent settings",
@@ -1852,17 +2066,26 @@ class OpenAgent(
         except Exception:
             await self.edit(event, f"<pre>{html.escape(text)}</pre>", as_html=True)
 
-    @command("oaimport", doc_ru="импорт настроек OpenAgent без секретов из reply/JSON", doc_en="import OpenAgent settings without secrets from reply/JSON")
+    @command(
+        "oaimport",
+        doc_ru="импорт настроек OpenAgent без секретов из reply/JSON",
+        doc_en="import OpenAgent settings without secrets from reply/JSON",
+    )
     async def cmd_oaimport(self, event: Event) -> None:
         try:
             payload = await self._read_import_payload(event)
             if not payload:
-                await self.edit(event, "Reply to openagent-settings.json or pass JSON after .oaimport")
+                await self.edit(
+                    event,
+                    "Reply to openagent-settings.json or pass JSON after .oaimport",
+                )
                 return
             settings = self._parse_import_config(payload)
             applied, skipped, failed = await self._apply_import_config(settings)
         except Exception as exc:
-            await self.edit(event, self.strings("error", error=html.escape(str(exc))), as_html=True)
+            await self.edit(
+                event, self.strings("error", error=html.escape(str(exc))), as_html=True
+            )
             return
         lines = [
             "OpenAgent settings import complete",
@@ -1874,16 +2097,26 @@ class OpenAgent(
             lines.append("skipped keys: " + ", ".join(sorted(skipped)[:30]))
         if failed:
             lines.append("failed keys: " + "; ".join(failed[:10]))
-        await self.edit(event, "<blockquote>" + html.escape("\n".join(lines)) + "</blockquote>", as_html=True)
+        await self.edit(
+            event,
+            "<blockquote>" + html.escape("\n".join(lines)) + "</blockquote>",
+            as_html=True,
+        )
 
-    @command("skills", doc_ru="список скиллов OpenAgent", doc_en="list OpenAgent skills")
+    @command(
+        "skills", doc_ru="список скиллов OpenAgent", doc_en="list OpenAgent skills"
+    )
     async def cmd_skills(self, event: Event) -> None:
         arg = self._args_raw(event)
         if arg in {"-repo", "--repo", "repo"}:
             try:
                 text = await self._format_skill_repo_list()
             except Exception as exc:
-                await self.edit(event, html.escape(self.strings("error", error=str(exc))), as_html=True)
+                await self.edit(
+                    event,
+                    html.escape(self.strings("error", error=str(exc))),
+                    as_html=True,
+                )
                 return
             await self.edit(event, "<pre>" + html.escape(text) + "</pre>", as_html=True)
             return
@@ -1897,18 +2130,41 @@ class OpenAgent(
             try:
                 text = path.read_text(encoding="utf-8")
                 first_line = text.splitlines()[0] if text.splitlines() else ""
-                frontmatter_name = re.search(r"^name:\s*(.+)$", text, flags=re.MULTILINE)
-                frontmatter_description = re.search(r"^description:\s*(.+)$", text, flags=re.MULTILINE)
+                frontmatter_name = re.search(
+                    r"^name:\s*(.+)$", text, flags=re.MULTILINE
+                )
+                frontmatter_description = re.search(
+                    r"^description:\s*(.+)$", text, flags=re.MULTILINE
+                )
             except Exception:
                 first_line = ""
                 frontmatter_name = None
                 frontmatter_description = None
-            name = frontmatter_name.group(1).strip() if frontmatter_name else self._skill_name_from_path(path)
-            title = frontmatter_description.group(1).strip() if frontmatter_description else first_line.lstrip("# ").strip() if first_line.startswith("#") else name
+            name = (
+                frontmatter_name.group(1).strip()
+                if frontmatter_name
+                else self._skill_name_from_path(path)
+            )
+            title = (
+                frontmatter_description.group(1).strip()
+                if frontmatter_description
+                else (
+                    first_line.lstrip("# ").strip()
+                    if first_line.startswith("#")
+                    else name
+                )
+            )
             lines.append(f"- {name}: {title}")
-        await self.edit(event, "<pre>" + html.escape("\n".join(lines)) + "</pre>", as_html=True)
+        await self.edit(
+            event, "<pre>" + html.escape("\n".join(lines)) + "</pre>", as_html=True
+        )
 
-    @command("skillinstall", alias=["ssinstall"], doc_ru="<name> установить OpenAgent skill из repo", doc_en="<name> install OpenAgent skill from repo")
+    @command(
+        "skillinstall",
+        alias=["ssinstall"],
+        doc_ru="<name> установить OpenAgent skill из repo",
+        doc_en="<name> install OpenAgent skill from repo",
+    )
     async def cmd_skillinstall(self, event: Event) -> None:
         name = self._args_raw(event)
         if not name:
@@ -1917,11 +2173,19 @@ class OpenAgent(
         try:
             saved_name = await self._install_repo_skill(name)
         except Exception as exc:
-            await self.edit(event, html.escape(self.strings("error", error=str(exc))), as_html=True)
+            await self.edit(
+                event, html.escape(self.strings("error", error=str(exc))), as_html=True
+            )
             return
-        await self.edit(event, self.strings("skill_installed", name=html.escape(saved_name)), as_html=True)
+        await self.edit(
+            event,
+            self.strings("skill_installed", name=html.escape(saved_name)),
+            as_html=True,
+        )
 
-    @command("sendss", doc_ru="<name> отправить .md скилл", doc_en="<name> send skill .md")
+    @command(
+        "sendss", doc_ru="<name> отправить .md скилл", doc_en="<name> send skill .md"
+    )
     async def cmd_sendss(self, event: Event) -> None:
         name = self._args_raw(event)
         if not name:
@@ -1942,7 +2206,11 @@ class OpenAgent(
         except Exception:
             pass
 
-    @command("imss", doc_ru="[name] импортировать .md скилл из reply", doc_en="[name] import .md skill from reply")
+    @command(
+        "imss",
+        doc_ru="[name] импортировать .md скилл из reply",
+        doc_en="[name] import .md skill from reply",
+    )
     async def cmd_imss(self, event: Event) -> None:
         reply = await event.get_reply_message()
         if not reply:
@@ -1960,7 +2228,9 @@ class OpenAgent(
             content = ""
 
         if not content:
-            content = getattr(reply, "raw_text", None) or getattr(reply, "text", "") or ""
+            content = (
+                getattr(reply, "raw_text", None) or getattr(reply, "text", "") or ""
+            )
         if not content.strip():
             await self.edit(event, self.strings("skill_empty"))
             return
@@ -1973,7 +2243,11 @@ class OpenAgent(
                 name = match.group(1).strip() if match else "skill"
 
         saved_name = self._save_skill(name, content)
-        await self.edit(event, self.strings("skill_imported", name=html.escape(saved_name)), as_html=True)
+        await self.edit(
+            event,
+            self.strings("skill_imported", name=html.escape(saved_name)),
+            as_html=True,
+        )
 
     @command("delss", doc_ru="<name> удалить скилл", doc_en="<name> delete skill")
     async def cmd_delss(self, event: Event) -> None:
@@ -1991,18 +2265,36 @@ class OpenAgent(
                 path.parent.rmdir()
         except Exception:
             pass
-        await self.edit(event, self.strings("skill_deleted", name=html.escape(self._skill_name_from_path(path))), as_html=True)
+        await self.edit(
+            event,
+            self.strings(
+                "skill_deleted", name=html.escape(self._skill_name_from_path(path))
+            ),
+            as_html=True,
+        )
 
-    @command("oaplugin", doc_ru="управление плагинами OpenAgent", doc_en="manage OpenAgent plugins")
+    @command(
+        "oaplugin",
+        doc_ru="управление плагинами OpenAgent",
+        doc_en="manage OpenAgent plugins",
+    )
     async def cmd_oaplugin(self, event: Event) -> None:
         """Show plugin manager or install a plugin from replied .py file."""
         if await event.get_reply_message():
             try:
                 saved_name = await self._install_plugin_from_reply(event)
             except Exception as exc:
-                await self.edit(event, self.strings("plugin_install_failed", error=html.escape(str(exc))), as_html=True)
+                await self.edit(
+                    event,
+                    self.strings("plugin_install_failed", error=html.escape(str(exc))),
+                    as_html=True,
+                )
                 return
-            await self.edit(event, self.strings("plugin_installed", name=html.escape(saved_name)), as_html=True)
+            await self.edit(
+                event,
+                self.strings("plugin_installed", name=html.escape(saved_name)),
+                as_html=True,
+            )
             return
 
         installed = self._plugins
@@ -2016,17 +2308,39 @@ class OpenAgent(
                 text += f"<blockquote>{pname} - {desc} | by {author}</blockquote>\n"
         text += self.strings("plugins_total", count=len(installed))
 
-        buttons = [[
-            self.Button.inline(self.strings("plugin_catalog_btn"), self._oaplugin_catalog, args=(0,), style="primary"),
-            self.Button.inline(self.strings("plugin_manager_btn"), self._oaplugin_manager, args=(0,), style="primary"),
-        ], [
-            self.Button.inline(self.strings("close_btn"), self._oaplugin_close, style="danger"),
-        ]]
+        buttons = [
+            [
+                self.Button.inline(
+                    self.strings("plugin_catalog_btn"),
+                    self._oaplugin_catalog,
+                    args=(0,),
+                    style="primary",
+                ),
+                self.Button.inline(
+                    self.strings("plugin_manager_btn"),
+                    self._oaplugin_manager,
+                    args=(0,),
+                    style="primary",
+                ),
+            ],
+            [
+                self.Button.inline(
+                    self.strings("close_btn"), self._oaplugin_close, style="danger"
+                ),
+            ],
+        ]
 
         chat_id = getattr(event, "chat_id", None)
         if chat_id:
             try:
-                await self.inline(chat_id, text, buttons=buttons, ttl=900, parse_mode="html", reply_to=getattr(event, "reply_to", None))
+                await self.inline(
+                    chat_id,
+                    text,
+                    buttons=buttons,
+                    ttl=900,
+                    parse_mode="html",
+                    reply_to=getattr(event, "reply_to", None),
+                )
                 await event.delete()
             except Exception:
                 await self.edit(event, text, as_html=True)
@@ -2059,7 +2373,9 @@ class OpenAgent(
         desc = m.get("description", self.strings("plugin_no_description"))
         tools = m.get("tools", [])
         fname = m.get("file_name", "")
-        plugin_key = self._safe_plugin_name(m.get("plugin_name") or fname.replace(".py", "") or name)
+        plugin_key = self._safe_plugin_name(
+            m.get("plugin_name") or fname.replace(".py", "") or name
+        )
         installed = plugin_key in self._plugins
 
         text = f"📦 <b>{name}</b> v{version} by <code>{author}</code>\n\n"
@@ -2074,21 +2390,56 @@ class OpenAgent(
         buttons = []
         raw_url = m.get("download_url", "")
         if installed:
-            buttons.append([self.Button.inline(self.strings("plugin_installed_btn"), self._oaplugin_noop, style="primary")])
+            buttons.append(
+                [
+                    self.Button.inline(
+                        self.strings("plugin_installed_btn"),
+                        self._oaplugin_noop,
+                        style="primary",
+                    )
+                ]
+            )
         else:
-            buttons.append([self.Button.inline(self.strings("plugin_install_btn"), self._oaplugin_install, args=(fname.replace(".py", ""), page), style="primary")])
+            buttons.append(
+                [
+                    self.Button.inline(
+                        self.strings("plugin_install_btn"),
+                        self._oaplugin_install,
+                        args=(fname.replace(".py", ""), page),
+                        style="primary",
+                    )
+                ]
+            )
         if raw_url:
             buttons[0].append(self.Button.url(self.strings("plugin_code_btn"), raw_url))
 
         nav = []
         if page > 0:
-            nav.append(self.Button.inline("⬅️", self._oaplugin_catalog, args=(page - 1,), style="primary"))
-        nav.append(self.Button.inline(f"📋 {page + 1}/{len(plugins)}", self._oaplugin_noop, style="primary"))
+            nav.append(
+                self.Button.inline(
+                    "⬅️", self._oaplugin_catalog, args=(page - 1,), style="primary"
+                )
+            )
+        nav.append(
+            self.Button.inline(
+                f"📋 {page + 1}/{len(plugins)}", self._oaplugin_noop, style="primary"
+            )
+        )
         if page < len(plugins) - 1:
-            nav.append(self.Button.inline("➡️", self._oaplugin_catalog, args=(page + 1,), style="primary"))
+            nav.append(
+                self.Button.inline(
+                    "➡️", self._oaplugin_catalog, args=(page + 1,), style="primary"
+                )
+            )
         if nav:
             buttons.append(nav)
-        buttons.append([self.Button.inline(self.strings("back_btn"), self._oaplugin_main, style="primary")])
+        buttons.append(
+            [
+                self.Button.inline(
+                    self.strings("back_btn"), self._oaplugin_main, style="primary"
+                )
+            ]
+        )
 
         try:
             await call.edit(text, buttons=buttons, parse_mode="html")
@@ -2112,24 +2463,43 @@ class OpenAgent(
                 author = getattr(plugin, "author", "?") or "?"
                 text += f"<blockquote>{pname} - {desc} | by {author}</blockquote>\n"
         text += self.strings("plugins_total", count=len(installed))
-        buttons = [[
-            self.Button.inline(self.strings("plugin_catalog_btn"), self._oaplugin_catalog, args=(0,), style="primary"),
-            self.Button.inline(self.strings("plugin_manager_btn"), self._oaplugin_manager, args=(0,), style="primary"),
-        ], [
-            self.Button.inline(self.strings("close_btn"), self._oaplugin_close, style="danger"),
-        ]]
+        buttons = [
+            [
+                self.Button.inline(
+                    self.strings("plugin_catalog_btn"),
+                    self._oaplugin_catalog,
+                    args=(0,),
+                    style="primary",
+                ),
+                self.Button.inline(
+                    self.strings("plugin_manager_btn"),
+                    self._oaplugin_manager,
+                    args=(0,),
+                    style="primary",
+                ),
+            ],
+            [
+                self.Button.inline(
+                    self.strings("close_btn"), self._oaplugin_close, style="danger"
+                ),
+            ],
+        ]
         try:
             await call.edit(text, buttons=buttons, parse_mode="html")
         except Exception:
             pass
 
     @callback(ttl=900)
-    async def _oaplugin_install(self, call: InlineMessage, name: str, page: int = 0) -> None:
+    async def _oaplugin_install(
+        self, call: InlineMessage, name: str, page: int = 0
+    ) -> None:
         """Download and install a plugin from repo."""
         await call.answer(self.strings("plugin_installing"), alert=False)
         try:
             saved_name = await self._install_plugin_from_repo(name)
-            await call.answer(self.strings("plugin_installed_alert", name=saved_name), alert=True)
+            await call.answer(
+                self.strings("plugin_installed_alert", name=saved_name), alert=True
+            )
         except Exception as exc:
             await call.answer(self.strings("generic_error", error=str(exc)), alert=True)
             return
@@ -2154,24 +2524,51 @@ class OpenAgent(
         text += f"{html.escape(self.strings('plugin_version_label'))}: {getattr(plugin, 'version', '?')}\n"
         text += f"Tools: {len(getattr(plugin, 'tool_registry', ()))}\n\n"
         text += self.strings("plugin_actions_title")
-        row1 = [self.Button.inline(self.strings("plugin_delete_btn"), self._oaplugin_uninstall, args=(plugin.name, page), style="danger")]
+        row1 = [
+            self.Button.inline(
+                self.strings("plugin_delete_btn"),
+                self._oaplugin_uninstall,
+                args=(plugin.name, page),
+                style="danger",
+            )
+        ]
         buttons = [row1]
         if len(installed) > 1:
             nav = []
             if page > 0:
-                nav.append(self.Button.inline("⬅️", self._oaplugin_manager, args=(page - 1,), style="primary"))
-            nav.append(self.Button.inline(f"{page + 1}/{len(installed)}", self._oaplugin_noop, style="primary"))
+                nav.append(
+                    self.Button.inline(
+                        "⬅️", self._oaplugin_manager, args=(page - 1,), style="primary"
+                    )
+                )
+            nav.append(
+                self.Button.inline(
+                    f"{page + 1}/{len(installed)}", self._oaplugin_noop, style="primary"
+                )
+            )
             if page < len(installed) - 1:
-                nav.append(self.Button.inline("➡️", self._oaplugin_manager, args=(page + 1,), style="primary"))
+                nav.append(
+                    self.Button.inline(
+                        "➡️", self._oaplugin_manager, args=(page + 1,), style="primary"
+                    )
+                )
             buttons.append(nav)
-        buttons.append([self.Button.inline(self.strings("back_btn"), self._oaplugin_main, style="primary")])
+        buttons.append(
+            [
+                self.Button.inline(
+                    self.strings("back_btn"), self._oaplugin_main, style="primary"
+                )
+            ]
+        )
         try:
             await call.edit(text, buttons=buttons, parse_mode="html")
         except Exception:
             pass
 
     @callback(ttl=900)
-    async def _oaplugin_uninstall(self, call: InlineMessage, name: str, page: int = 0) -> None:
+    async def _oaplugin_uninstall(
+        self, call: InlineMessage, name: str, page: int = 0
+    ) -> None:
         """Delete a plugin."""
         try:
             name = self._safe_plugin_name(name)
@@ -2189,11 +2586,18 @@ class OpenAgent(
                 except ValueError:
                     pass
             if not is_builtin:
-                for extra in (plugins_dir / f"{name}.py", plugins_dir / f"{name}_plugin.py"):
+                for extra in (
+                    plugins_dir / f"{name}.py",
+                    plugins_dir / f"{name}_plugin.py",
+                ):
                     if extra.exists():
                         extra.unlink()
-            await call.answer(self.strings("plugin_deleted_alert", name=name), alert=True)
+            await call.answer(
+                self.strings("plugin_deleted_alert", name=name), alert=True
+            )
         except Exception as exc:
             await call.answer(self.strings("generic_error", error=str(exc)), alert=True)
             return
-        await self._oaplugin_manager(call, min(page, len(self._plugins) - 1) if self._plugins else 0)
+        await self._oaplugin_manager(
+            call, min(page, len(self._plugins) - 1) if self._plugins else 0
+        )
