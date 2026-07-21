@@ -1,5 +1,5 @@
 # -- repo data --
-# scop: kernel min v1.4.4
+# scop: kernel min v1.4.5
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # -- end --
 # SPDX-License-Identifier: MIT
