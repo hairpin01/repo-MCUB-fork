@@ -74,7 +74,7 @@ from core.lib.loader.module_config import (
 if TYPE_CHECKING:
     from core.lib.types import InlineMessage, Event, Kernel
 
-OPENAGENT_LIB_VERSION = '0.8.0-main.build:1041'
+OPENAGENT_LIB_VERSION = '0.8.0-main.build:1042'
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z0-9_]+)\}")
@@ -3028,6 +3028,42 @@ class _OpenAgentRuntimeToolsMixin:
             "Use the provided context only when it is clearly relevant."
         )
 
+    def _active_plugins_prompt(self) -> str:
+        lines = ["\n\n## Activated plugins"]
+        plugins = getattr(self, "_plugins", {}) or {}
+        if not plugins:
+            lines.append("- none")
+            return "\n".join(lines)
+
+        for name, plugin in sorted(plugins.items(), key=lambda item: str(item[0])):
+            desc = _WHITESPACE_RE.sub(
+                " ", str(getattr(plugin, "description", "") or "")
+            ).strip() or "no description"
+            author = _WHITESPACE_RE.sub(
+                " ", str(getattr(plugin, "author", "") or "")
+            ).strip()
+
+            tool_names: set[str] = set()
+            for tool_name in getattr(plugin, "tool_registry", ()) or ():
+                if tool_name:
+                    tool_names.add(str(tool_name).strip().lower())
+            for tool_name in (getattr(plugin, "tool_map", {}) or {}).keys():
+                if tool_name:
+                    tool_names.add(str(tool_name).strip().lower())
+
+            sorted_tools = sorted(tool_names)
+            if len(sorted_tools) > 12:
+                tools_text = ", ".join(sorted_tools[:12])
+                tools_text += f", ...(+{len(sorted_tools) - 12} more)"
+            elif sorted_tools:
+                tools_text = ", ".join(sorted_tools)
+            else:
+                tools_text = "no registered tools"
+
+            author_text = f"; author: {author}" if author else ""
+            lines.append(f"- {name}: {desc}{author_text}; tools: {tools_text}")
+        return "\n".join(lines)
+
     def _thinking_system_prompt(self, flash_mode: bool = False) -> str:
         base = self._flash_system_prompt() if flash_mode else str(self.config["system_prompt"]).strip()
         effort = self._reasoning_effort()
@@ -3076,6 +3112,10 @@ class _OpenAgentRuntimeToolsMixin:
         todo_snapshot = self._format_todo_placeholder()
         prompt += (
             f"\n\n{self.name} {self.version} is active. Author: {self.author}. You have access to {len(self._effective_tool_registry())} tool operations.\n"
+            "\n## What tools are\n"
+            "Tools are OpenAgent operations that let you do work outside plain text: inspect the workspace, run terminal commands, use MCUB/Telegram actions, manage skills/todos/context, and call plugin features.\n"
+            "Core tools are built into OpenAgent. Plugin tools are created and registered by activated OpenAgent plugins; a plugin can add new tool names, handlers, and documentation.\n"
+            "Always call tools when you need external state, actions, files, Telegram/MCUB operations, or tool/plugin documentation.\n"
             "\n## Tool call format\n"
             "Output one or more fenced JSON blocks. Each block is ONE tool call:\n"
             "```tool_call\n"
@@ -3096,6 +3136,10 @@ class _OpenAgentRuntimeToolsMixin:
             "- ONLY ```tool_call``` fenced JSON blocks. No XML tags. No plain JSON outside fences.\n"
             "- When no tool is needed: reply in plain text with no ```tool_call``` blocks at all.\n"
              f"Available tool names: {tlist}\n"
+             "\n## Tool discovery and docs\n"
+             "- Call utility.list_tools to get the current list of core and plugin tools grouped by category.\n"
+             "- Call utility.tool_help with args {\"tool\":\"tool.name\"} to get one tool's description, arguments, and body usage.\n"
+             "- These discovery utilities are tools too: call them with ```tool_call``` blocks instead of guessing.\n"
              "\n## Guidelines\n"
              "1. Use only tools from 'Available tool names'. Wrong names fail immediately.\n"
              "2. mcub.* tools: omit the userbot prefix (body='ping', not '.ping').\n"
@@ -3110,6 +3154,7 @@ class _OpenAgentRuntimeToolsMixin:
         prompt += "\n\nCurrent TODO state:\n" + todo_snapshot
         prompt += self._load_skills_prompt(user_prompt)
         prompt += self._repo_context_prompt()
+        prompt += self._active_plugins_prompt()
         return prompt
 
     async def _run_terminal(self, command: str) -> str:
