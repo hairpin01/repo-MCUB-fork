@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 from contextlib import redirect_stdout, redirect_stderr
 
+import core.lib.loader.module_base as loader
+import core.lib.loader.module_config as mod_cfg
+import utils
+
 import aiohttp
 
 
@@ -28,11 +32,11 @@ class EvalPlugin:
         "eval.python",
     )
 
-    dangerous_tools = {"eval.python", "eval"}
+    dangerous_tools = {"eval.python", "eval", "eval.python.telegram"}
 
     tool_docs = {
         "eval.python": {
-            "desc": "Execute Python code inside an async function with OpenAgent runtime objects available",
+            "desc": "Execute Python code inside an async function with OpenAgent runtime objects available and client/event/loader etc...",
             "args": "code (str) or expr (str); timeout (int)",
             "body": "Python code. You may use await and return from the async function.",
             "returns": "Confirmation text with the performed action details, or an error message.",
@@ -44,6 +48,7 @@ class EvalPlugin:
     tool_map = {
         "eval": "cmd_eval",
         "eval.python": "cmd_eval",
+        "eval.python.telegram": 'cmd_eval'
     }
 
     config_defaults = {
@@ -101,6 +106,9 @@ class EvalPlugin:
             "time": time,
             "html": html,
             "contextlib": contextlib,
+            "loader": loader,
+            "mod_cfg": mod_cfg,
+            "utils": utils,
         }
         function_source = "async def __openagent_eval__():\n" + textwrap.indent(code, "    ")
         local_env: dict[str, Any] = {}
