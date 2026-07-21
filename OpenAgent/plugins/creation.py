@@ -34,10 +34,38 @@ class CreationPlugin:
     }
 
     tool_docs = {
-        "creation.channel": {"desc": "Create a Telegram channel", "args": "title (str) or name (str); about (str) or description (str)", "body": "title"},
-        "creation.group": {"desc": "Create a Telegram group", "args": "title (str) or name (str); about (str) or description (str)", "body": "title"},
-        "creation.bot": {"desc": "Create a Telegram bot via BotFather", "args": "name (str) or title (str); username (str) or bot (str); about (str)", "body": "not used"},
-        "creation.private_invite": {"desc": "Join a chat by invite link", "args": "link (str) — invite link", "body": "invite link"},
+        "creation.channel": {
+            "desc": "Create a Telegram channel",
+            "args": "title (str) or name (str); about (str) or description (str)",
+            "body": "title",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"creation.channel\", \"args\": {\"title\": \"New channel\", \"about\": \"Description\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "creation.group": {
+            "desc": "Create a Telegram group",
+            "args": "title (str) or name (str); about (str) or description (str)",
+            "body": "title",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"creation.group\", \"args\": {\"title\": \"New group\", \"about\": \"Description\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "creation.bot": {
+            "desc": "Create a Telegram bot via BotFather",
+            "args": "name (str) or title (str); username (str) or bot (str); about (str)",
+            "body": "not used",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"creation.bot\", \"args\": {\"name\": \"My Bot\", \"username\": \"my_example_bot\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "creation.private_invite": {
+            "desc": "Join a chat by invite link",
+            "args": "link (str) — invite link",
+            "body": "invite link",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"creation.private_invite\", \"args\": {\"link\": \"https://t.me/+invite\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
     }
 
     tool_map = {

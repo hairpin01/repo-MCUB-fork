@@ -33,11 +33,46 @@ class WebPlugin:
     }
 
     tool_docs = {
-        "web.search": {"desc": "Search the web or fetch a URL", "args": "query (str) or q (str) or url (str) — search query or web page URL", "body": "query or URL"},
-        "web.fetch_url": {"desc": "Fetch and return text content of a URL", "args": "url (str) — the web page to fetch", "body": "URL"},
-        "web.read_html": {"desc": "Fetch a URL and extract readable text from HTML", "args": "url (str) — page to read", "body": "URL"},
-        "web.extract_links": {"desc": "Fetch a URL and extract all links", "args": "url (str) — page to scan", "body": "URL"},
-        "web.summarize_page": {"desc": "Fetch a URL and return its content as plain text", "args": "url (str) — page to summarize", "body": "URL"},
+        "web.search": {
+            "desc": "Search the web or fetch a URL",
+            "args": "query (str) or q (str) or url (str) — search query or web page URL",
+            "body": "query or URL",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"web.search\", \"args\": {\"query\": \"OpenAgent MCUB\"}}",
+            "notes": "Network availability and remote page limits may affect output.",
+        },
+        "web.fetch_url": {
+            "desc": "Fetch and return text content of a URL",
+            "args": "url (str) — the web page to fetch",
+            "body": "URL",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"web.fetch_url\", \"args\": {\"url\": \"https://example.com\"}}",
+            "notes": "Network availability and remote page limits may affect output.",
+        },
+        "web.read_html": {
+            "desc": "Fetch a URL and extract readable text from HTML",
+            "args": "url (str) — page to read",
+            "body": "URL",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"web.read_html\", \"args\": {\"url\": \"https://example.com\"}}",
+            "notes": "Network availability and remote page limits may affect output.",
+        },
+        "web.extract_links": {
+            "desc": "Fetch a URL and extract all links",
+            "args": "url (str) — page to scan",
+            "body": "URL",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"web.extract_links\", \"args\": {\"url\": \"https://example.com\"}}",
+            "notes": "Network availability and remote page limits may affect output.",
+        },
+        "web.summarize_page": {
+            "desc": "Fetch a URL and return its content as plain text",
+            "args": "url (str) — page to summarize",
+            "body": "URL",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"web.summarize_page\", \"args\": {\"url\": \"https://example.com\"}}",
+            "notes": "Network availability and remote page limits may affect output.",
+        },
     }
 
     config_defaults = {

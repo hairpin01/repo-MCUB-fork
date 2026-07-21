@@ -25,12 +25,54 @@ class FilePlugin:
     dangerous_tools = {"file.send", "file.download_media", "file.write", "file.edit", "file.patch"}
 
     tool_docs = {
-        "file.send": {"desc": "Send a file from disk to a Telegram chat", "args": "path (str) or file (str); chat (str) — target; caption (str)", "body": "file path"},
-        "file.download_media": {"desc": "Download media from a Telegram message", "args": "message (str) or msg (str) — message ID; chat (str) or from (str)", "body": "not used"},
-        "file.read_text": {"desc": "Read a text file (UTF-8, first 12k chars)", "args": "path (str) or file (str) or name (str)", "body": "file path"},
-        "file.write": {"desc": "Write or append content to a file", "args": "path (str) — file; mode (str) — 'overwrite' or 'append'", "body": "content to write"},
-        "file.edit": {"desc": "Search and replace text in a file", "args": "path (str); search (str); replace (str); count (int)", "body": "'search -> replace' format"},
-        "file.patch": {"desc": "Apply a unified diff to a file", "args": "path (str); reverse (str) — 'true' to reverse", "body": "unified diff content"},
+        "file.send": {
+            "desc": "Send a file from disk to a Telegram chat",
+            "args": "path (str) or file (str); chat (str) — target; caption (str)",
+            "body": "file path",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"file.send\", \"args\": {\"path\": \"result.txt\", \"chat\": \"current\"}}",
+            "notes": "Relative paths are resolved from the runtime workspace.",
+        },
+        "file.download_media": {
+            "desc": "Download media from a Telegram message",
+            "args": "message (str) or msg (str) — message ID; chat (str) or from (str)",
+            "body": "not used",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"file.download_media\", \"args\": {\"message\": \"123\", \"chat\": \"current\"}}",
+            "notes": "Relative paths are resolved from the runtime workspace.",
+        },
+        "file.read_text": {
+            "desc": "Read a text file (UTF-8, first 12k chars)",
+            "args": "path (str) or file (str) or name (str)",
+            "body": "file path",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"file.read_text\", \"args\": {\"path\": \"README.md\"}}",
+            "notes": "Relative paths are resolved from the runtime workspace.",
+        },
+        "file.write": {
+            "desc": "Write or append content to a file",
+            "args": "path (str) — file; mode (str) — 'overwrite' or 'append'",
+            "body": "content to write",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"file.write\", \"args\": {\"path\": \"notes.txt\", \"mode\": \"overwrite\"}, \"body\": \"file content\"}",
+            "notes": "Relative paths are resolved from the runtime workspace.",
+        },
+        "file.edit": {
+            "desc": "Search and replace text in a file",
+            "args": "path (str); search (str); replace (str); count (int)",
+            "body": "'search -> replace' format",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"file.edit\", \"args\": {\"path\": \"notes.txt\", \"search\": \"old\", \"replace\": \"new\"}}",
+            "notes": "Relative paths are resolved from the runtime workspace.",
+        },
+        "file.patch": {
+            "desc": "Apply a unified diff to a file",
+            "args": "path (str); reverse (str) — 'true' to reverse",
+            "body": "unified diff content",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"file.patch\", \"args\": {\"path\": \"file.py\"}, \"body\": \"unified diff\"}",
+            "notes": "Relative paths are resolved from the runtime workspace.",
+        },
     }
 
     tool_map = {

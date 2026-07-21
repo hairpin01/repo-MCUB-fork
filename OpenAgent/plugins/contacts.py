@@ -31,11 +31,46 @@ class ContactsPlugin:
     }
 
     tool_docs = {
-        "contacts.add": {"desc": "Add a user to your contacts", "args": "user (str); first_name (str); last_name (str); phone (str)", "body": "user identifier"},
-        "contacts.delete": {"desc": "Delete a contact from your contacts list", "args": "user (str) — user to remove", "body": "user identifier"},
-        "contacts.block": {"desc": "Block a user", "args": "user (str) — user to block", "body": "user identifier"},
-        "contacts.unblock": {"desc": "Unblock a previously blocked user", "args": "user (str) — user to unblock", "body": "user identifier"},
-        "contacts.entity": {"desc": "Resolve a username or ID to entity info", "args": "user (str) — username or ID", "body": "user identifier"},
+        "contacts.add": {
+            "desc": "Add a user to your contacts",
+            "args": "user (str); first_name (str); last_name (str); phone (str)",
+            "body": "user identifier",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"contacts.add\", \"args\": {\"user\": \"@user\", \"first_name\": \"Name\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "contacts.delete": {
+            "desc": "Delete a contact from your contacts list",
+            "args": "user (str) — user to remove",
+            "body": "user identifier",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"contacts.delete\", \"args\": {\"user\": \"@user\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "contacts.block": {
+            "desc": "Block a user",
+            "args": "user (str) — user to block",
+            "body": "user identifier",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"contacts.block\", \"args\": {\"user\": \"@user\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "contacts.unblock": {
+            "desc": "Unblock a previously blocked user",
+            "args": "user (str) — user to unblock",
+            "body": "user identifier",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"contacts.unblock\", \"args\": {\"user\": \"@user\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
+        "contacts.entity": {
+            "desc": "Resolve a username or ID to entity info",
+            "args": "user (str) — username or ID",
+            "body": "user identifier",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"contacts.entity\", \"args\": {\"user\": \"@user\"}}",
+            "notes": "Requires the current Telegram account to have access and sufficient permissions.",
+        },
     }
 
     tool_map = {

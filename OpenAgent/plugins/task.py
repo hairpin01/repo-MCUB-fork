@@ -24,11 +24,15 @@ class TaskPlugin:
             "desc": "Start another OpenAgent tool in background. When it finishes, a live user.comment is queued for the current run.",
             "args": "tool/name (str) — tool to run; attrs (str) — inner attrs; label (str)",
             "body": "body for the inner tool",
+            "returns": "Text result or an error message.",
+            "example": "{\"tool\": \"task.background\", \"args\": {\"tool\": \"web.search\"}, \"body\": \"OpenAgent MCUB\"}",
         },
         "task.run_background": {
             "desc": "Alias of task.background",
             "args": "tool/name (str); attrs (str); label (str)",
             "body": "body for the inner tool",
+            "returns": "Text result or an error message.",
+            "example": "{\"tool\": \"task.run_background\", \"args\": {\"tool\": \"web.search\"}, \"body\": \"OpenAgent MCUB\"}",
         },
     }
 

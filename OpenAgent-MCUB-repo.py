@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: MIT
 # -- repo data --
 # scop: kernel min v1.4.5
+# scope: heroku_min 9.9.9
+# хе
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # -- end --
-# SPDX-License-Identifier: MIT
 # requires: aiohttp
 # scop: inline
 
@@ -81,7 +83,7 @@ from core.lib.loader.module_config import (
 if TYPE_CHECKING:
     from core.lib.types import InlineMessage, Event, Kernel
 
-_OPENAGENT_LIB_VERSION = "0.8.0-main.build:1042"
+_OPENAGENT_LIB_VERSION = "0.8.0-main.build:1043"
 _OPENAGENT_LIB_FILES = ("__init__.py", "mixins.py")
 _OPENAGENT_LIB_RAW_BASE = (
     "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/lib/OpenAgent"
@@ -266,7 +268,7 @@ class OpenAgent(
     ModuleBase,
 ):
     name = "OpenAgent"
-    version = "0.8.0-main.build:1042"
+    version = "0.8.0-main.build:1043"
     author = "@dev_dolbaeb && @Hairpin00"
     description = {
         "ru": "ИИ агент в юзерботе с новой архитектурой инструментов",

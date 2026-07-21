@@ -35,6 +35,9 @@ class EvalPlugin:
             "desc": "Execute Python code inside an async function with OpenAgent runtime objects available",
             "args": "code (str) or expr (str); timeout (int)",
             "body": "Python code. You may use await and return from the async function.",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"eval.python\", \"body\": \"return 2 + 2\"}",
+            "notes": "Debug-only runtime execution; use only for trusted code.",
         },
     }
 

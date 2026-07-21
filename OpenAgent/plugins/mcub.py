@@ -23,11 +23,46 @@ class McubPlugin:
     dangerous_tools = {"mcub.command", "mcub.install", "mcub.reload"}
 
     tool_docs = {
-        "mcub.command": {"desc": "Execute any MCUB userbot command", "args": "command (str) or cmd (str) — command text (prefix auto-added)", "body": "command text"},
-        "mcub.config": {"desc": "Get or set MCUB module configuration", "args": "command (str) or query (str) — config command like 'module.key=value'", "body": "config command"},
-        "mcub.modules": {"desc": "List loaded MCUB modules", "args": "command (str) or query (str)", "body": "not used"},
-        "mcub.install": {"desc": "Install a module from a repo URL", "args": "command (str) or query (str) — module URL or name", "body": "URL or name"},
-        "mcub.reload": {"desc": "Reload all modules (equivalent to .restart)", "args": "none", "body": "not used"},
+        "mcub.command": {
+            "desc": "Execute any MCUB userbot command",
+            "args": "command (str) or cmd (str) — command text (prefix auto-added)",
+            "body": "command text",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"mcub.command\", \"args\": {\"command\": \"ping\"}}",
+            "notes": "Userbot command prefix is added automatically when needed.",
+        },
+        "mcub.config": {
+            "desc": "Get or set MCUB module configuration",
+            "args": "command (str) or query (str) — config command like 'module.key=value'",
+            "body": "config command",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"mcub.config\", \"args\": {\"query\": \"OpenAgent.system_prompt\"}}",
+            "notes": "Userbot command prefix is added automatically when needed.",
+        },
+        "mcub.modules": {
+            "desc": "List loaded MCUB modules",
+            "args": "command (str) or query (str)",
+            "body": "not used",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"mcub.modules\", \"args\": {}}",
+            "notes": "Userbot command prefix is added automatically when needed.",
+        },
+        "mcub.install": {
+            "desc": "Install a module from a repo URL",
+            "args": "command (str) or query (str) — module URL or name",
+            "body": "URL or name",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"mcub.install\", \"args\": {\"query\": \"https://example.com/module.py\"}}",
+            "notes": "Userbot command prefix is added automatically when needed.",
+        },
+        "mcub.reload": {
+            "desc": "Reload all modules (equivalent to .restart)",
+            "args": "none",
+            "body": "not used",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"mcub.reload\", \"args\": {}}",
+            "notes": "Userbot command prefix is added automatically when needed.",
+        },
     }
 
     tool_map = {

@@ -34,11 +34,46 @@ class TerminalPlugin:
     dangerous_tools = {"terminal.run", "terminal.inspect"}
 
     tool_docs = {
-        "terminal.run": {"desc": "Run any shell command on the server", "args": "command (str) or cmd (str) — shell command to execute", "body": "command text"},
-        "terminal.inspect": {"desc": "Run an arbitrary shell command to inspect system state", "args": "command (str) or cmd (str) — command to run", "body": "command text"},
-        "terminal.list_files": {"desc": "List files and directories in a folder", "args": "path (str) — directory path (default: .)", "body": "path text"},
-        "terminal.read_file": {"desc": "Read a file (UTF-8, first 12k chars)", "args": "path (str) or file (str) — file to read", "body": "path text"},
-        "terminal.git_status": {"desc": "Show git status of the workspace", "args": "none", "body": "not used"},
+        "terminal.run": {
+            "desc": "Run any shell command on the server",
+            "args": "command (str) or cmd (str) — shell command to execute",
+            "body": "command text",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"terminal.run\", \"args\": {\"command\": \"pwd\"}}",
+            "notes": "Runs on the server workspace; avoid interactive commands.",
+        },
+        "terminal.inspect": {
+            "desc": "Run an arbitrary shell command to inspect system state",
+            "args": "command (str) or cmd (str) — command to run",
+            "body": "command text",
+            "returns": "Confirmation text with the performed action details, or an error message.",
+            "example": "{\"tool\": \"terminal.inspect\", \"args\": {\"command\": \"git status --short\"}}",
+            "notes": "Runs on the server workspace; avoid interactive commands.",
+        },
+        "terminal.list_files": {
+            "desc": "List files and directories in a folder",
+            "args": "path (str) — directory path (default: .)",
+            "body": "path text",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"terminal.list_files\", \"args\": {\"path\": \".\"}}",
+            "notes": "Runs on the server workspace; avoid interactive commands.",
+        },
+        "terminal.read_file": {
+            "desc": "Read a file (UTF-8, first 12k chars)",
+            "args": "path (str) or file (str) — file to read",
+            "body": "path text",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"terminal.read_file\", \"args\": {\"path\": \"README.md\"}}",
+            "notes": "Runs on the server workspace; avoid interactive commands.",
+        },
+        "terminal.git_status": {
+            "desc": "Show git status of the workspace",
+            "args": "none",
+            "body": "not used",
+            "returns": "Text result with the requested data, or an error message.",
+            "example": "{\"tool\": \"terminal.git_status\", \"args\": {}}",
+            "notes": "Runs on the server workspace; avoid interactive commands.",
+        },
     }
 
     config_defaults = {
