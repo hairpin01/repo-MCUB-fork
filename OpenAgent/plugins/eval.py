@@ -30,6 +30,7 @@ class EvalPlugin:
 
     tool_registry = (
         "eval.python",
+        "eval.python.telegram.help",
     )
 
     dangerous_tools = {"eval.python", "eval", "eval.python.telegram"}
@@ -48,7 +49,8 @@ class EvalPlugin:
     tool_map = {
         "eval": "cmd_eval",
         "eval.python": "cmd_eval",
-        "eval.python.telegram": 'cmd_eval'
+        "eval.python.telegram": 'cmd_eval',
+        "eval.python.telegram.help": 'cmd_help',
     }
 
     config_defaults = {
@@ -63,6 +65,65 @@ class EvalPlugin:
         if len(text) <= limit:
             return text
         return text[:limit] + "\n...[truncated]"
+
+    async def cmd_help(self):
+        return """
+inline:
+The first important thing to know: inline buttons mean that sending (EXACTLY SENDING) is done via `self.inline()`:
+```python
+await self.inline(event.chat_id, 'text', reply_to=getattr(reply, 'id', None), buttons=None)
+```
+peer, text form, reply_to=None, buttons=None, parse_mode='html', file: str = None (link to file), photo: str = None (link to photo)
+buttons: these are the buttons; they can be made in any way, but the best and most universally suitable one is:
+```python
+# loader already available, and it's core.lib.loader.module_base
+@loader.callback()
+async def on_click(self, call, data=None) -> None:
+   await call.answer('test')
+
+ok, message = await self.inline(event.chat_id, 'success', buttons=[[self.Button.inline('text', on_click)]]
+```
+More details in doc/inline/inline-form.md|doc/inline/*.md
+
+client:
+```python
+await self.client(Any_request)
+# client from telethon-mkub, almost the same as in regular telethon, import:
+import telethon
+return telethon.__version__
+```
+```python
+m = await self.client.send_message(
+    event.chat_id,
+    '<b>text</b>',
+    reply_to=getattr(event, 'reply_to', None),
+    parse_mode='html',
+    file='path/to/file/or/url',
+)
+await m.edit('NEW text!')
+await m.delete()
+# DO NOT DELETE `event`!
+
+from telethon import events
+from core.lib.utils.exceptions import CallInsecure
+try:
+    @self.client.on(events.Raw) # blocked from ClientProxy!
+    async def deny_watcher(event):
+        pass
+except CallInsecure as e:
+    return e
+# GOOD:
+@loader.watcher()
+async def good_watcher(self, event) -> None:
+    self.log.info(event)
+```
+doc: doc/api/*.md|API_DOC.md
+utils:
+```python
+# invoke - run mcub command:
+await self.invoke('cmd', chat_id=event.chat_id, reply_to=None, args='args') # run '.cmd args'
+```
+"""
 
     async def cmd_eval(self, attrs_raw: str, body: str, source_event: Any | None = None) -> str:
         attrs = self.agent._parse_xml_attrs(attrs_raw)
