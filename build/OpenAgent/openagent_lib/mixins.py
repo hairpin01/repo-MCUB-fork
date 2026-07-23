@@ -2259,8 +2259,6 @@ class _OpenAgentPluginSkillMixin:
                 code = data.decode("utf-8", errors="replace")
         except Exception:
             code = ""
-        if not code:
-            code = getattr(reply, "raw_text", None) or getattr(reply, "text", "") or ""
         if not code.strip():
             raise ValueError("Plugin code is empty")
         name = arg_name.strip()
