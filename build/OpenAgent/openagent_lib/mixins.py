@@ -119,7 +119,7 @@ from .todo import (
     _DEFAULT_TODO_STATUS_MAP,
     _WHITESPACE_RE,
 )
-
+OPENAGENT_LIB_VERSION = '0.8.0-main.build:1043' # fallback
 class _OpenAgentLifecycleMixin:
     """Lifecycle/bootstrap logic."""
 
