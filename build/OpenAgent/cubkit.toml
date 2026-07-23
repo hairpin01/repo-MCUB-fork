@@ -1,0 +1,5 @@
+id = 'openagent'
+name = 'OpenAgent'
+entrypoint = "OpenAgent.py"
+package = 'openagent_lib'
+assets = "assets"
