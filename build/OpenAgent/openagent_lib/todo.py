@@ -1,8 +1,11 @@
+from __future__ import annotations
 
 import json
 import html
 import asyncio
 import re
+
+from typing import Any
 
 _TODO_STATUS_ALIASES = {
     "open": "open",
