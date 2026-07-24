@@ -1,4 +1,5 @@
 id = 'openagent'
+src = 'src'
 name = 'OpenAgent'
 entrypoint = "OpenAgent.py"
 package = 'openagent_lib'
