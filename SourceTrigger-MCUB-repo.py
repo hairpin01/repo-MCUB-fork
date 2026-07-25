@@ -897,7 +897,7 @@ class SourceTriggerMod(ModuleBase):
             for e in entries
         ]
         results = await asyncio.gather(*tasks)
-        if should_delete and message.out and any(results):
+        if should_delete:
             try:
                 await event.delete()
             except Exception:
