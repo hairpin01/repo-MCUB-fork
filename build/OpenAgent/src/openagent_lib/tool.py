@@ -581,27 +581,47 @@ class _OpenAgentToolRegistryMixin:
             attrs = self._parse_xml_attrs(attrs_raw)
 
             kwargs = {}
-            if "tool_name" in params: kwargs["tool_name"] = name
-            if "attrs_raw" in params: kwargs["attrs_raw"] = attrs_raw
-            if "body" in params: kwargs["body"] = body
-            if "source_event" in params: kwargs["source_event"] = source_event
-            if "status_event" in params: kwargs["status_event"] = status_event
-            if "agent_log" in params: kwargs["agent_log"] = agent_log
-            if "started_at" in params: kwargs["started_at"] = started_at
-            if "thinking_notes" in params: kwargs["thinking_notes"] = thinking_notes
-            if "runtime_token" in params: kwargs["runtime_token"] = self._placeholder_context.get("cancel_token")
+            if "tool_name" in params:
+                kwargs["tool_name"] = name
+            if "attrs_raw" in params:
+                kwargs["attrs_raw"] = attrs_raw
+            if "body" in params:
+                kwargs["body"] = body
+            if "source_event" in params:
+                kwargs["source_event"] = source_event
+            if "status_event" in params:
+                kwargs["status_event"] = status_event
+            if "agent_log" in params:
+                kwargs["agent_log"] = agent_log
+            if "started_at" in params:
+                kwargs["started_at"] = started_at
+            if "thinking_notes" in params:
+                kwargs["thinking_notes"] = thinking_notes
+            if "runtime_token" in params:
+                kwargs["runtime_token"] = self._placeholder_context.get(
+                                              "cancel_token"
+                                          )
             if "kind" in params:
-                kwargs["kind"] = "group" if name.endswith("group") else "channel"
-            if "command" in params: kwargs["command"] = body.strip() # for _run_terminal
-            if "query" in params: kwargs["query"] = body.strip() or attrs_raw # fallback
+                kwargs["kind"] = "group" if name.endswith(
+                    "group"
+                ) else "channel"
+            if "command" in params:
+                # for _run_terminal
+                kwargs["command"] = body.strip()
+            if "query" in params:
+                # fallback
+                kwargs["query"] = body.strip() or attrs_raw
             if "mode" in params:
                 if name.endswith("list_groups"):
                     kwargs["mode"] = "groups"
                 elif name.endswith("list_all"):
                     kwargs["mode"] = "all"
                 else:
-                    kwargs["mode"] = body.strip() or attrs.get("mode") or "private"
-            if "target" in params: kwargs["target"] = body.strip() or attrs.get("target", "")
+                    kwargs["mode"] = body.strip() or attrs.get(
+                        "mode"
+                    ) or "private"
+            if "target" in params:
+                kwargs["target"] = body.strip() or attrs.get("target", "")
 
             if method_name == "_run_mcub_command" and not kwargs.get("command"):
                 command_map = {
@@ -696,7 +716,12 @@ class OpenAgentToolDisplayService:
             return configured["default"]
         if group == "reconnect":
             return emoji_getter("reconnect", "🔄")
-        return _DEFAULT_TOOL_STATUS_EMOJIS.get(group, _DEFAULT_TOOL_STATUS_EMOJIS["default"])
+        return _DEFAULT_TOOL_STATUS_EMOJIS.get(
+            group,
+            _DEFAULT_TOOL_STATUS_EMOJIS[
+                "default"
+            ]
+        )
 
     def status_text(self, tool_name: str, title: str, strings_getter: Callable[..., str]) -> str:
         tool_name = (tool_name or "").lower().strip()

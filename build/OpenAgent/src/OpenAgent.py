@@ -11,58 +11,16 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
-import difflib
 import html
-import inspect
 import io
-import mimetypes
-import random
 import re
-import tempfile
 import time
 import uuid
 import json
-import sys
-from dataclasses import dataclass, field
-import importlib
-import importlib.util
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
-from urllib.parse import quote, urlparse
+from typing import Any, TYPE_CHECKING
 
-import aiohttp
-from telethon import events
-from telethon.tl.functions.account import (
-    UpdateProfileRequest,
-    UpdateUsernameRequest as UpdateAccountUsernameRequest,
-)
-from telethon.tl.functions.channels import (
-    CreateChannelRequest,
-    EditAdminRequest,
-    EditPhotoRequest,
-    EditTitleRequest,
-    JoinChannelRequest,
-    ToggleSlowModeRequest,
-    UpdateUsernameRequest,
-)
-from telethon.tl.functions.contacts import (
-    AddContactRequest,
-    BlockRequest,
-    DeleteContactsRequest,
-    UnblockRequest,
-)
-from telethon.tl.functions.messages import (
-    EditChatAboutRequest,
-    ExportChatInviteRequest,
-    ImportChatInviteRequest,
-    SaveDraftRequest,
-)
-from telethon.tl.functions.photos import UploadProfilePhotoRequest
-from telethon.tl.functions.users import GetFullUserRequest
-from telethon.tl.types import ChannelParticipantsAdmins, ChatAdminRights
 
 from core.lib.loader.module_base import ModuleBase, callback, command
 from core.lib.loader.module_config import (
@@ -81,28 +39,13 @@ from core.lib.loader.module_config import (
 )
 
 if TYPE_CHECKING:
-    from core.lib.types import InlineMessage, Event, Kernel
+    from core.lib.types import InlineMessage, Event
 
 from openagent_lib.mixins import (
-    _WHITESPACE_RE,
-    _PLACEHOLDER_RE,
-    _TODO_STATUS_ALIASES,
-    _DEFAULT_TODO_STATUS_MAP,
-    _SESSION_PREFERENCES,
-    _TOOL_GROUP_ALIASES,
-    _DEFAULT_TOOL_STATUS_EMOJIS,
-    OASession,
-    SessionManager,
-    OpenAgentPlugin,
     _OpenAgentLifecycleMixin,
-    OpenAgentProviderService,
-    OpenAgentTemplateService,
     _OpenAgentProviderMixin,
-    OpenAgentTodoService,
     _OpenAgentTodoMixin,
-    OpenAgentToolDisplayService,
     _OpenAgentToolDisplayMixin,
-    OpenAgentContextService,
     _OpenAgentContextMixin,
     _OpenAgentSessionsMixin,
     _OpenAgentPluginSkillMixin,

@@ -582,11 +582,17 @@ class _OpenAgentPluginSkillMixin:
             desc_m = re.search(r'"en"\s*:\s*"(.+?)"', code)
         tools_m = re.findall(r'"((?:terminal|web|mcub|message|file|dialog|chat|moderation|profile|contacts|creation|account|code|utility|skills|context|todo|thinking)\.[\w.]+)"', code)
 
-        if name_m: meta["name"] = name_m.group(1)
-        if ver_m: meta["version"] = ver_m.group(1)
-        if author_m: meta["author"] = author_m.group(1)
-        if desc_m: meta["description"] = desc_m.group(1)
-        if tools_m: meta["tools"] = tools_m
+        if name_m:
+            meta["name"] = name_m.group(1)
+        if ver_m:
+            meta["version"] = ver_m.group(1)
+        if author_m:
+            meta["author"] = author_m.group(1)
+        if desc_m:
+            meta["description"] = desc_m.group(1)
+        if tools_m:
+            meta["tools"] = tools_m
+
         return meta
 
     async def _install_plugin_from_repo(self, name: str) -> str:
@@ -1569,7 +1575,6 @@ class _OpenAgentStatusMixin:
             "skills.install", "skills.import_md", "skills.save_from_ai",
             "code.generate_file", "code.generate_mcub_module", "code.attach_result",
         }
-        critical_groups = {"terminal", "mcub", "message", "file", "moderation", "profile", "contacts", "creation"}
         medium_groups = {
             "terminal", "mcub", "message", "file", "moderation", "profile",
             "contacts", "creation", "chat", "dialog", "context", "skills", "code",

@@ -1,22 +1,23 @@
 from __future__ import annotations
 """Plain service for OpenAgent chat sessions and persistence."""
 
+import re
+import json
+import time
+import uuid
+import html
+import asyncio
+import tempfile
+import datetime
+import contextlib
+from pathlib import Path
 from typing import (
     Any,
     Callable,
 )
-import asyncio
-import contextlib
-from pathlib import Path
-import tempfile
-import json
-import time
-import uuid
-import re
-import datetime
-import html
 
 from .oasession import OASession
+
 _SESSION_PREFERENCES = frozenset({"ask", "continue", "new"})
 
 
