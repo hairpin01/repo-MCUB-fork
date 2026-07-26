@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Auto-loaded OpenAgent runtime mixins for MCUB.
-# Source: https://github.com/hairpin01/repo-MCUB-fork/tree/main/lib/OpenAgent
+# Source: https://github.com/hairpin01/repo-MCUB-fork/tree/main/build/OpenAgent/src
 
 from __future__ import annotations
 

@@ -9,7 +9,6 @@ import asyncio
 import json
 import importlib
 from urllib.parse import quote
-import aiohttp
 import re
 import html
 import io
@@ -22,6 +21,7 @@ import uuid
 
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.channels import EditPhotoRequest
+import aiohttp
 
 from core.lib.types import (
     Kernel,

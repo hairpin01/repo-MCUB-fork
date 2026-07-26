@@ -44,7 +44,7 @@ _DEFAULT_TOOL_STATUS_EMOJIS = {
     "default": "🛠",
 }
 
-from .plugin import (
+from .PluginsEngine import (
     OpenAgentPlugin,
 )
 

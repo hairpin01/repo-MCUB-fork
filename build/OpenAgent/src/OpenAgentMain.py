@@ -3,6 +3,7 @@
 # -- repo data --
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # -- end --
+# scop: kernel min v1.4.5
 
 from __future__ import annotations
 
@@ -37,21 +38,24 @@ from core.lib.loader.module_config import (
 if TYPE_CHECKING:
     from core.lib.types import InlineMessage, Event
 
-from openagent_lib.OpenAgentMixins import (
-    _OpenAgentLifecycleMixin,
-    _OpenAgentProviderMixin,
-    _OpenAgentTodoMixin,
-    _OpenAgentToolDisplayMixin,
-    _OpenAgentContextMixin,
-    _OpenAgentSessionsMixin,
-    _OpenAgentPluginSkillMixin,
-    _OpenAgentRuntimeToolsMixin,
-    _OpenAgentTelegramMediaMixin,
-    _OpenAgentStatusMixin,
-    _OpenAgentAgentLoopMixin,
-    _OpenAgentResponseMixin,
-    _OpenAgentToolRegistryMixin,
-)
+try:
+    from openagent_lib.OpenAgentMixins import (
+        _OpenAgentLifecycleMixin,
+        _OpenAgentProviderMixin,
+        _OpenAgentTodoMixin,
+        _OpenAgentToolDisplayMixin,
+        _OpenAgentContextMixin,
+        _OpenAgentSessionsMixin,
+        _OpenAgentPluginSkillMixin,
+        _OpenAgentRuntimeToolsMixin,
+        _OpenAgentTelegramMediaMixin,
+        _OpenAgentStatusMixin,
+        _OpenAgentAgentLoopMixin,
+        _OpenAgentResponseMixin,
+        _OpenAgentToolRegistryMixin,
+    )
+except Exception as e:
+    raise RuntimeError(e) from e # debug
 
 
 class OpenAgent(
