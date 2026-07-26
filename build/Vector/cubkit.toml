@@ -1,0 +1,8 @@
+id = 'vector'
+entrypoint = 'VectorMain.py'
+src = 'src'
+# out = '../../Vector-MCUB-repo.py'
+scop = 'inline'
+
+
+package = ['Button', 'Http', 'BuilderPage']
