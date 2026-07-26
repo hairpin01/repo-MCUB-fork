@@ -9,7 +9,7 @@ import asyncio
 import json
 import importlib
 from urllib.parse import quote
-import cubkit.lib.aiohttp
+import aiohttp
 import re
 import html
 import io

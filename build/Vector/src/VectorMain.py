@@ -40,6 +40,7 @@ from core.lib.types import Event
 # local
 from .Const import (
     LOADING_BANNER,
+    _esc,
 )
 from .Button.CallbackButtonHandler import VectorCallbackButtonHandlerMixin
 from .Button.InputButtonHandler import VectorInputButtonHandlerMixin
