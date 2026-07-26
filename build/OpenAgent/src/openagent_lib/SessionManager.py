@@ -1,5 +1,5 @@
+# SPDX-License-Identifier: MIT
 from __future__ import annotations
-"""Plain service for OpenAgent chat sessions and persistence."""
 
 import re
 import json
@@ -16,7 +16,7 @@ from typing import (
     Callable,
 )
 
-from .oasession import OASession
+from .OASessionManager import OASession
 
 _SESSION_PREFERENCES = frozenset({"ask", "continue", "new"})
 

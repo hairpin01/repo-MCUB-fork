@@ -4,38 +4,38 @@
 
 from __future__ import annotations
 
-from .oasession import (
+from .OASessionManager import (
     OASession
 )
-from .session_manager import (
+from .SessionManager import (
     _SESSION_PREFERENCES,
     SessionManager,
     _OpenAgentSessionsMixin,
 )
-from .plugin import (
+from .PluginsEngine import (
     OpenAgentPlugin,
     _OpenAgentPluginSkillMixin,
     _OpenAgentTelegramMediaMixin,
     _OpenAgentStatusMixin,
     _OpenAgentAgentLoopMixin,
 )
-from .todo import (
+from .TodoService import (
     OpenAgentTodoService,
     _OpenAgentTodoMixin,
     _TODO_STATUS_ALIASES,
     _DEFAULT_TODO_STATUS_MAP,
     _WHITESPACE_RE,
 )
-from .lifecycle import (
+from .Lifecycle import (
     _OpenAgentLifecycleMixin
 )
-from .placeholder import (
+from .Placeholders import (
     _PLACEHOLDER_RE,
     OpenAgentProviderService,
     OpenAgentTemplateService,
     _OpenAgentProviderMixin,
 )
-from .tool import (
+from .ToolDispatch import (
     _DEFAULT_TOOL_STATUS_EMOJIS,
     OpenAgentToolDisplayService,
     _OpenAgentToolDisplayMixin,
@@ -43,11 +43,11 @@ from .tool import (
     _OpenAgentRuntimeToolsMixin,
     _OpenAgentToolRegistryMixin,
 )
-from .context import (
+from .ContextService import (
     OpenAgentContextService,
     _OpenAgentContextMixin,
 )
-from .response import (
+from .ResponseAgent import (
     _OpenAgentResponseMixin
 )
 

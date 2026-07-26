@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: MIT
-# -- repo data --
-# scop: kernel min v1.4.5
 # scope: heroku_min 9.9.9
-# хе
+# -- repo data --
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # -- end --
-# requires: aiohttp
-# scop: inline
 
 from __future__ import annotations
 
@@ -41,7 +37,7 @@ from core.lib.loader.module_config import (
 if TYPE_CHECKING:
     from core.lib.types import InlineMessage, Event
 
-from openagent_lib.mixins import (
+from openagent_lib.OpenAgentMixins import (
     _OpenAgentLifecycleMixin,
     _OpenAgentProviderMixin,
     _OpenAgentTodoMixin,
@@ -1213,7 +1209,7 @@ class OpenAgent(
         Answer('❔ About', 'AI agent in userbot with refreshed tool architecture')
     )
     SESSION_LIMIT = 20
-    from .mcub_event import _MCUBEvent
+    from .MCUBEvent import _MCUBEvent
 
     @callback(ttl=900)
     async def _open_sessions_panel(

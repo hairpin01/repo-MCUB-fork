@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 from typing import Any
@@ -8,7 +9,7 @@ import asyncio
 import json
 import importlib
 from urllib.parse import quote
-import aiohttp
+import cubkit.lib.aiohttp
 import re
 import html
 import io
@@ -35,7 +36,7 @@ from core.lib.loader.module_config import (
     Integer,
 )
 
-from .todo import _WHITESPACE_RE
+from .TodoService import _WHITESPACE_RE
 
 class OpenAgentPlugin:
     """Base class for OpenAgent plugins."""

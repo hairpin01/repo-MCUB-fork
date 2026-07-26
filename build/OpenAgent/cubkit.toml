@@ -1,6 +1,8 @@
 id = 'openagent'
 src = 'src'
-name = 'OpenAgent'
-entrypoint = "OpenAgent.py"
+entrypoint = "OpenAgentMain.py"
 package = 'openagent_lib'
-assets = "assets"
+scop = 'kernel min v1.4.5'
+requires = ["aiohttp"]
+sign = true
+

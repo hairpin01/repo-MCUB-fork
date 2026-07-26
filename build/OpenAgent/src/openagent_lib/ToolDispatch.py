@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -12,7 +13,7 @@ from pathlib import Path
 import contextlib
 import json
 
-from .oasession import OASession
+from .OASessionManager import OASession
 
 _TOOL_GROUP_ALIASES = {
     "web_search": "web",

@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 from pathlib import Path
 import asyncio
 from typing import Any
 
-from .plugin import OpenAgentPlugin
-from .session_manager import SessionManager
+from .PluginsEngine import OpenAgentPlugin
+from .SessionManager import SessionManager
 
 class _OpenAgentLifecycleMixin:
     """Lifecycle/bootstrap logic."""
