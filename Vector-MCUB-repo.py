@@ -2,7 +2,7 @@
 # version: 2.4.2
 # scop: inline
 # CubKit build info:
-# CubKit source sha256: d20eb73e4b036b4cd26136bdbaf5055642c0d028783f7fadbaffc102b7945e77
+# CubKit source sha256: c1dac41aab6d9276cb62c9580bb8a3381a10bf1f18a25b78ce4a152699cbd92b
 # CubKit payload sha256: f7b5dcb5ad63ff3083ccf41c2d72f28c65219e961edff0c675cfb31db23fe58f
 # CubKit source map:
 # - generated line 439 -> VectorMain.py:1
@@ -455,6 +455,7 @@ del __cubkit_bootstrap__
 #   AND ITS ORIGINAL AUTHORSHIP BELONGS TO @samsepi0l_ovf.
 #   ALL OFFICIAL UPDATES, RELEASE NOTES, AND PATCHES ARE PUBLISHED IN THE TELEGRAM CHANNEL @goymodules.
 # ====================================================================================================================
+# scop: kernel min v1.4.6
 
 
 import logging
@@ -476,6 +477,7 @@ from core.lib.types import Event
 # local
 from .Const import (
     LOADING_BANNER,
+    _esc,
 )
 from .Button.CallbackButtonHandler import VectorCallbackButtonHandlerMixin
 from .Button.InputButtonHandler import VectorInputButtonHandlerMixin
