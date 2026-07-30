@@ -95,11 +95,11 @@ class SosalClicker(ModuleBase):
     )
     async def sosal_clicker_command(self, message: events.NewMessage.Event) -> None:
         btn = [[self.Button.inline("Click", self.on_click)]]  # add self.Button v1.2.6.1
-        await self.kernel._inline.inline_form(
+        await self.subinline.form(
             message.chat_id,
             f"<b>Sosal count:</b> {self._sosal_count}\n<blockquote>1 click = one sosal count</blockquote>",
             buttons=btn,
-        )  # noqe: ignore[use 'kernel._inline']
+        )
 
     @command(
         "cocaлpeзeт",
