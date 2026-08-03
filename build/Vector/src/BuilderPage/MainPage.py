@@ -7,8 +7,6 @@ from contextlib import suppress
 from typing import Any
 from urllib.parse import quote
 
-from telethon import Button
-
 # local
 from ..Const import API_BASE, _esc
 
@@ -246,7 +244,7 @@ class VectorMainPageMixin:
 
         kbd = [
             [
-                {"text": self.strings["v_btn_copy"], "copy": q},
+                self.Button.copy(self.strings["v_btn_copy"], q),
                 self.Button.inline(
                     self.strings["v_btn_dl"],
                     self.cb_install,
@@ -254,7 +252,7 @@ class VectorMainPageMixin:
                         "install", owner=owner, name=name, i=i, gl=gl, q=q
                     ),
                 ),
-                Button.url(
+                self.Button.url(
                     self.strings["v_btn_code"], item.get("source_url", "") or ""
                 ),
             ],
