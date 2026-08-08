@@ -1,7 +1,7 @@
 id = 'vector'
 entrypoint = 'VectorMain.py'
-src = 'src'
-# out = '../../Vector-MCUB-repo.py'
+src = 'Src'
+out = '../../Vector-MCUB-repo.py'
 scop = 'inline'
 
 

@@ -142,9 +142,10 @@ class VectorCallbackButtonHandlerMixin:
                 )
             return
 
-
-        token = await self._get_active_token()
-        if not token:
+        m_list, token_ok = await self._run_search(
+            q, limit=self.config["limit"], lang=self._detect_lang_suffix()
+        )
+        if not token_ok:
             with suppress(Exception):
                 await event.edit(
                     self.bannote
@@ -153,12 +154,16 @@ class VectorCallbackButtonHandlerMixin:
                     link_preview=False,
                 )
             return
+        if m_list is None:
+            with suppress(Exception):
+                await event.edit(
+                    f"{self.ICONS['error']} <b>{self.strings('v_err_api')}</b>",
+                    parse_mode="html",
+                    link_preview=False,
+                )
+            return
 
-        m_list = await self._search_modules(
-            q, limit=self.config["limit"], lang=self._detect_lang_suffix()
-        )
         LOG.info("cb_vector_search: %d results for q=%r", len(m_list), q)
-
         if not m_list:
             with suppress(Exception):
                 await event.edit(
@@ -175,7 +180,6 @@ class VectorCallbackButtonHandlerMixin:
             for k in old:
                 self._cached_groups.pop(k, None)
 
-        # Step 3: show results with module banner (or fallback)
         item = m_list[0]
         await self._safe_edit(
             event,
@@ -237,6 +241,76 @@ class VectorCallbackButtonHandlerMixin:
                 group[i].get("banner"),
             )
 
+    def _list_button_text(self, index: int, item: dict[str, Any]) -> str:
+        name = str(item.get("name") or "?").strip()
+        author = str(item.get("author") or "?").strip()
+        text = f"{index + 1}. {name} by {author}"
+        return text if len(text) <= 64 else text[:61].rstrip() + "…"
+
+    def _build_list_kbd(
+        self,
+        group: list[dict[str, Any]],
+        q: str,
+        pg: int,
+        orig_i: int,
+        expanded: bool = False,
+    ) -> list:
+        gl = len(group)
+        total_pages = max(1, (gl + 4) // 5)
+        pg = pg % total_pages
+        start, end = pg * 5, min((pg + 1) * 5, gl)
+        kbd = []
+        for idx in range(start, end):
+            item = group[idx]
+            kbd.append(
+                [
+                    self.Button.inline(
+                        self._list_button_text(idx, item),
+                        self.cb_nav,
+                        data=self._cb_data(
+                            "nav", i=idx, gl=gl, q=q, expanded=False
+                        ),
+                    )
+                ]
+            )
+
+        prev_pg = (pg - 1) % total_pages
+        next_pg = (pg + 1) % total_pages
+        kbd.append(
+            [
+                self.Button.inline(
+                    "◀️",
+                    self.cb_page,
+                    data=self._cb_data(
+                        "page", pg=prev_pg, i=orig_i, gl=gl, q=q, expanded=expanded
+                    ),
+                ),
+                self.Button.inline(
+                    self.strings("v_page", idx=pg + 1, total=total_pages),
+                    self.cb_dummy,
+                ),
+                self.Button.inline(
+                    "▶️",
+                    self.cb_page,
+                    data=self._cb_data(
+                        "page", pg=next_pg, i=orig_i, gl=gl, q=q, expanded=expanded
+                    ),
+                ),
+            ]
+        )
+        kbd.append(
+            [
+                self.Button.inline(
+                    self.strings["v_btn_bck"],
+                    self.cb_nav,
+                    data=self._cb_data(
+                        "nav", i=orig_i, gl=gl, q=q, expanded=expanded
+                    ),
+                )
+            ]
+        )
+        return kbd
+
     @callback()
     async def cb_list(
         self, event: InlineMessage, data: dict[str, Any] | None = None
@@ -245,8 +319,10 @@ class VectorCallbackButtonHandlerMixin:
             await event.answer()
         if not data:
             return
-        group = self._cached_groups.get(data.get("q", ""), [])
+        q = data.get("q", "")
+        group = self._cached_groups.get(q, [])
         i = data.get("i", 0)
+        expanded = bool(data.get("expanded", False))
         if not group:
             with suppress(Exception):
                 await event.edit(
@@ -256,11 +332,35 @@ class VectorCallbackButtonHandlerMixin:
                 )
             return
         i = i if 0 <= i < len(group) else 0
+        pg = int(data.get("pg", i // 5))
+        title = f"{self.ICONS['modules_list']} <b>{self.strings('v_res_hdr')}</b>"
         await self._safe_edit(
             event,
-            self._build_html(group[i], i + 1, len(group)),
-            self._build_kbd(group[i], i, group, data.get("q", "")),
-            group[i].get("banner"),
+            title,
+            self._build_list_kbd(group, q, pg, i, expanded=expanded),
+        )
+
+    @callback()
+    async def cb_page(
+        self, event: InlineMessage, data: dict[str, Any] | None = None
+    ) -> None:
+        with suppress(Exception):
+            await event.answer()
+        if not data:
+            return
+        q = data.get("q", "")
+        group = self._cached_groups.get(q, [])
+        if not group:
+            return
+        orig_i = data.get("i", 0)
+        orig_i = orig_i if 0 <= orig_i < len(group) else 0
+        pg = int(data.get("pg", 0))
+        expanded = bool(data.get("expanded", False))
+        title = f"{self.ICONS['modules_list']} <b>{self.strings('v_res_hdr')}</b>"
+        await self._safe_edit(
+            event,
+            title,
+            self._build_list_kbd(group, q, pg, orig_i, expanded=expanded),
         )
 
     @callback()
@@ -280,16 +380,25 @@ class VectorCallbackButtonHandlerMixin:
                     self.bannote or self.strings("v_err_api"), alert=True
                 )
             return
-        uid = self._parse_jwt(token).get("sub", "")
-        res = await self._net_req(
-            "POST",
-            f"/api/rate/{quote(str(uid), safe='')}/{quote(m_owner, safe='')}/{quote(m_name, safe='')}/{action}",
-            token=token,
-        )
-        if not res:
+
+        async def _send_rate(active_token: str) -> dict[str, Any] | None:
+            uid = self._parse_jwt(active_token).get("sub", "")
+            return await self._net_req(
+                "POST",
+                f"/api/rate/{quote(str(uid), safe='')}/{quote(m_owner, safe='')}/{quote(m_name, safe='')}/{action}",
+                token=active_token,
+            )
+
+        res = await _send_rate(token)
+        if not res or (isinstance(res, dict) and res.get("ok") is False):
+            token = await self._get_active_token(force=True)
+            if token:
+                res = await _send_rate(token)
+        if not res or (isinstance(res, dict) and res.get("ok") is False):
             with suppress(Exception):
                 await event.answer(self.strings("v_err_api"), alert=True)
             return
+
         nl, nd = self._extract_counts(res)
         if group and i < len(group):
             if nl is not None:
@@ -298,7 +407,13 @@ class VectorCallbackButtonHandlerMixin:
                 group[i]["dislikes"] = nd
             item = group[i]
         else:
-            item = {"name": m_name, "likes": nl or 0, "dislikes": nd or 0}
+            item = {
+                "name": m_name,
+                "owner": m_owner,
+                "likes": nl or 0,
+                "dislikes": nd or 0,
+                "source_url": f"{API_BASE}/modules/{quote(m_owner, safe='')}/{quote(m_name, safe='')}/source",
+            }
         await self._safe_edit(
             event,
             self._build_html(item, i + 1, len(group or [item])),
@@ -356,14 +471,50 @@ class VectorCallbackButtonHandlerMixin:
     ) -> None:
         if not data:
             return
-        m_name = data.get("name", "")
+        m_owner, m_name = data.get("owner", ""), data.get("name", "")
         i, q = data.get("i", 0), data.get("q", "")
         group = self._cached_groups.get(q, [])
-        item = group[i] if group and 0 <= i < len(group) else {"name": m_name}
+        item = (
+            group[i]
+            if group and 0 <= i < len(group)
+            else {"name": m_name, "owner": m_owner}
+        )
+
+        cached = self.seccache.get(m_name)
+        if cached and cached.get("check"):
+            await self._safe_edit(
+                event,
+                f"{self.ICONS['safe']} <i>{self.strings('v_aud_mem')}</i>\n\n{self._build_sec_html(item, cached)}",
+                self._build_sec_kbd(item, i, group, q, True),
+                item.get("banner"),
+            )
+            return
+
+        token = await self._get_active_token()
+        if not token:
+            with suppress(Exception):
+                await event.answer(self.bannote or self.strings("v_err_api"), alert=True)
+            return
+        res = await self._net_req(
+            "GET",
+            f"/api/modules/{quote(m_owner, safe='')}/{quote(m_name, safe='')}/security-check",
+            token=token,
+        )
+        if not res or self.httpc >= 400:
+            await self._safe_edit(
+                event,
+                f"{self.ICONS['error']} <b>{self.strings('v_aud_err')}</b>",
+                self._build_sec_kbd(item, i, group, q, True),
+                item.get("banner"),
+            )
+            return
+        if res.get("check"):
+            self.seccache[m_name] = res
         await self._safe_edit(
             event,
-            self._build_sec_html(item, None),
-            self._build_sec_kbd(item, i, group, q, False),
+            self._build_sec_html(item, res),
+            self._build_sec_kbd(item, i, group, q, bool(res.get("check"))),
+            item.get("banner"),
         )
 
     @callback()
@@ -383,30 +534,43 @@ class VectorCallbackButtonHandlerMixin:
         token = await self._get_active_token()
         if not token:
             with suppress(Exception):
-                await event.answer(self.strings("v_err_api"), alert=True)
+                await event.answer(self.bannote or self.strings("v_err_api"), alert=True)
             return
-        with suppress(Exception):
-            await event.edit(
-                f"{self.ICONS['shield']} <b>{_esc(m_name)}</b>\n\n{self.strings('v_aud_req')}",
-                parse_mode="html",
-                link_preview=False,
-            )
+        await self._safe_edit(
+            event,
+            f"{self.ICONS['search']} <b>{self.strings('v_aud_proc')}</b>",
+            self._build_sec_kbd(item, i, group, q, True),
+            item.get("banner"),
+        )
         res = await self._net_req(
             "POST",
-            f"/api/scan/{quote(m_owner, safe='')}/{quote(m_name, safe='')}",
+            f"/api/modules/{quote(m_owner, safe='')}/{quote(m_name, safe='')}/security-check",
             token=token,
+            timeout=120,
         )
-        if not res:
+        if self.httpc == 429:
             await self._safe_edit(
                 event,
-                f"{self.ICONS['error']} <b>{_esc(m_name)}</b>\n\n{self.strings('v_aud_err')}",
+                f"{self.ICONS['warn']} <b>{self.strings('v_aud_zero')}</b>",
                 self._build_sec_kbd(item, i, group, q, True),
+                item.get("banner"),
             )
             return
+        if not res or self.httpc >= 400:
+            await self._safe_edit(
+                event,
+                f"{self.ICONS['error']} <b>{self.strings('v_aud_err')}</b>",
+                self._build_sec_kbd(item, i, group, q, True),
+                item.get("banner"),
+            )
+            return
+        if res.get("check"):
+            self.seccache[m_name] = res
         await self._safe_edit(
             event,
             self._build_sec_html(item, res),
             self._build_sec_kbd(item, i, group, q, True),
+            item.get("banner"),
         )
 
     @callback()

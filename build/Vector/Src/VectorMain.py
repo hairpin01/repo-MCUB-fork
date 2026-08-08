@@ -21,14 +21,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import logging
+import sys
 from typing import Any
 from urllib.parse import quote
 
-from telethon import Button
-
 # api
-from core.lib.loader.module_base import ModuleBase, command
+from core.lib.loader.module_base import ModuleBase, command, loop
 from core.lib.loader.module_config import (
     Boolean,
     ConfigValue,
@@ -66,11 +67,12 @@ class Vector(
     ModuleBase,
 ):
     name = "Vector"
-    version = "2.4.2"
+    version = "2.4.4"
     author = "@samsepi0l_ovf"
     description = {
         "en": "Vector module registry browser.\nhttps://www.0xvector.lol",
         "ru": "Бpayзep peecтpa мoдyлeй Vector.\nhttps://www.0xvector.lol",
+        "uk": "Браузер реєстру модулів Vector.\nhttps://www.0xvector.lol",
     }
     dependencies = ["aiohttp"]
     banner_url = "https://raw.githubusercontent.com/sepiol026-wq/GoyModules/refs/heads/main/assets/vector.png"
@@ -89,6 +91,12 @@ class Vector(
             validator=Integer(min=1, max=100),
         ),
         ConfigValue(
+            "auto_update_notify",
+            True,
+            description="Notify me about module updates (hashing-based).",
+            validator=Boolean(),
+        ),
+        ConfigValue(
             "VectorInstall",
             True,
             description="Enable Vector Install",
@@ -103,12 +111,14 @@ class Vector(
 
     strings: dict[str, dict[str, str]] = strings_i18n
     _cached_groups: dict[str, list[dict[str, Any]]] = {}
+    seccache: dict[str, dict[str, Any]] = {}
 
 
     @command(
         "vector",
         doc_en="<query> \u2014 search modules in Vector.",
         doc_ru="<\u0437\u0430\u043f\u0440\u043e\u0441> \u2014 \u043f\u043e\u0438\u0441\u043a \u043c\u043e\u0434\u0443\u043b\u0435\u0439 \u0432 Vector.",
+        doc_uk="<запит> — пошук модулів у Vector.",
     )
     async def vectorcmd(self, event: Event) -> None:
         q = event.text.split(maxsplit=1)
@@ -153,63 +163,149 @@ class Vector(
                 link_preview=False,
             )
 
+    def _hash_module_source(self, module_instance: Any | None = None) -> str:
+        target = module_instance or self
+        module = sys.modules.get(target.__class__.__module__)
+        loader = getattr(module, "__loader__", None)
+        if loader and hasattr(loader, "get_source"):
+            try:
+                source = loader.get_source(target.__class__.__module__)
+                if source:
+                    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+            except Exception as e:
+                LOG.debug("_hash_module_source: loader.get_source failed: %r", e)
+
+        if module:
+            try:
+                source = inspect.getsource(module)
+                return hashlib.sha256(source.encode("utf-8")).hexdigest()
+            except Exception as e:
+                LOG.debug("_hash_module_source: inspect.getsource failed: %r", e)
+        return ""
+
+    async def _sync_installed_modules(self) -> bool:
+        token = await self._get_active_token()
+        if not token:
+            return False
+        modules_data: list[dict[str, str]] = []
+        lang = self._detect_lang_suffix()
+        for collection_name in ("loaded_modules", "system_modules"):
+            collection = getattr(self.kernel, collection_name, {}) or {}
+            for module in collection.values():
+                module_hash = self._hash_module_source(module)
+                if not module_hash:
+                    continue
+                modules_data.append(
+                    {
+                        "class_name": module.__class__.__name__,
+                        "contentHash": module_hash,
+                        "language": lang,
+                    }
+                )
+        if not modules_data:
+            return False
+        res = await self._net_req(
+            "PUT",
+            "/api/users/me/modules",
+            token=token,
+            json_data={"modules": modules_data},
+            timeout=30,
+        )
+        return bool(res and res.get("ok"))
+
+    @loop(interval=86_400, autostart=True)
+    async def _sync_modules_keeper(self) -> None:
+        if not self.config["auto_update_notify"]:
+            return
+        try:
+            await self._sync_installed_modules()
+        except Exception as e:
+            LOG.debug("_sync_modules_keeper: failed: %r", e)
+
+    async def _install_vector_update(self, event: Event, dl_url: str) -> None:
+        await event.edit(
+            f"{self.ICONS['search']} <b>{self.strings('v_upd_req')}</b>",
+            parse_mode="html",
+            link_preview=False,
+        )
+        res, _errors = await self._safe_install("Vector", dl_url, notify=False)
+        text = (
+            f"{self.ICONS['safe']} <b>{self.strings('v_upd_ok')}</b>"
+            if res == 1
+            else f"{self.ICONS['error']} <b>{self.strings('v_upd_err')}</b>"
+        )
+        await event.edit(text, parse_mode="html", link_preview=False)
+
     @command(
         "vecupdate",
         doc_en="[-f|--force] \u2014 update Vector module.",
         doc_ru="[-f|--force] \u2014 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u043c\u043e\u0434\u0443\u043b\u044c Vector.",
+        doc_uk="[-f|--force] — оновити модуль Vector.",
     )
     async def vecupdate(self, event: Event) -> None:
         args = event.text.split(maxsplit=1)
         args_str = args[1].strip() if len(args) > 1 else ""
         force = "-f" in args_str or "--force" in args_str
         LOG.info("vecupdate: force=%s", force)
+
         dl_url = "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/refs/heads/main/Vector-MCUB-repo.py"
         if force:
-            await event.edit(
-                f"{self.ICONS['search']} <b>{self.strings('v_upd_req')}</b>",
-                parse_mode="html",
-                link_preview=False,
-            )
-            res, _ = await self._safe_install("Vector", dl_url, notify=False)
-            if res == -1:
-                await event.edit(
-                    f"{self.ICONS['error']} <b>{self.strings('v_upd_err')}</b>",
-                    parse_mode="html",
-                    link_preview=False,
-                )
-            elif res == 1:
-                await event.edit(
-                    f"{self.ICONS['safe']} <b>{self.strings('v_upd_ok')}</b>",
-                    parse_mode="html",
-                    link_preview=False,
-                )
-            else:
-                await event.edit(
-                    f"{self.ICONS['error']} <b>{self.strings('v_upd_err')}</b>",
-                    parse_mode="html",
-                    link_preview=False,
-                )
+            await self._install_vector_update(event, dl_url)
             return
-        await self.subinline.form(
-            event.chat_id,
-            f"{self.ICONS['safe']} {self.strings('v_upd_same')}",
-            buttons=[
-                [
-                    self.Button.inline(
-                        self.strings["v_upd_force_btn"],
-                        self.force_update,
-                        data=self._cb_data("force_upd", url=dl_url),
-                    )
-                ]
-            ],
+
+        await event.edit(
+            f"{self.ICONS['search']} <b>{self.strings('v_upd_check')}</b>",
             parse_mode="html",
+            link_preview=False,
         )
+
+        remote_bytes = await self._net_req("GET", dl_url, as_bytes=True, timeout=30)
+        if not remote_bytes:
+            LOG.warning("vecupdate: remote source unavailable, installing anyway")
+            await self._install_vector_update(event, dl_url)
+            return
+
+        remote_hash = hashlib.sha256(remote_bytes).hexdigest()
+        local_hash = self._hash_module_source()
+        if local_hash:
+            LOG.debug(
+                "vecupdate: local_hash=%s remote_hash=%s",
+                local_hash[:16],
+                remote_hash[:16],
+            )
+        else:
+            LOG.warning("vecupdate: local source hash unavailable, assuming update needed")
+
+        if local_hash and local_hash == remote_hash:
+            await self.subinline.form(
+                event.chat_id,
+                f"{self.ICONS['search']} <b>{self.strings('v_upd_req')}</b>\n\n{self.strings('v_upd_same')}",
+                buttons=[
+                    [
+                        self.Button.inline(
+                            self.strings["v_upd_force_btn"],
+                            self.force_update,
+                            data=self._cb_data("force_upd", url=dl_url),
+                        ),
+                        self.Button.inline(
+                            self.strings["v_upd_cancel"],
+                            self.cb_dummy,
+                            data=self._cb_data("cancel_update"),
+                        ),
+                    ]
+                ],
+                parse_mode="html",
+            )
+            return
+
+        await self._install_vector_update(event, dl_url)
 
 
     @command(
         "vecme",
         doc_en="\u2014 open Vector as Telegram Mini App.",
         doc_ru="\u2014 \u043e\u0442\u043a\u0440\u044b\u0442\u044c Vector \u043a\u0430\u043a Telegram Mini App.",
+        doc_uk="— відкрити Vector як Telegram Mini App.",
     )
     async def vecmecmd(self, event: Event) -> None:
         bot_info = await self._net_req("GET", "/api/tg-bot")
@@ -222,11 +318,14 @@ class Vector(
             )
             return
         link = f"https://t.me/{bot_uname}/vector"
-        text = f"{self.ICONS['shield']} <b>Vector Mini App</b>\n\nOpen Vector in Telegram Mini App"
+        text = (
+            f"{self.ICONS['shield']} <b>{self.strings('v_miniapp_title')}</b>\n\n"
+            f"{self.strings('v_miniapp_body')}"
+        )
         await self.subinline.form(
             event.chat_id,
             text,
-            buttons=[[Button.url("\U0001f680 Open", link)]],
+            buttons=[[self.Button.url(self.strings("v_miniapp_btn"), link)]],
             parse_mode="html",
         )
 
@@ -234,6 +333,7 @@ class Vector(
         "vecdl",
         doc_en="<slug or URL> \u2014 download and install entire module collection from Vector.",
         doc_ru="<slug \u0438\u043b\u0438 \u0441\u0441\u044b\u043b\u043a\u0430> \u2014 \u0441\u043a\u0430\u0447\u0430\u0442\u044c \u0438 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e \u0438\u0437 Vector.",
+        doc_uk="<slug або URL> — завантажити та встановити колекцію з Vector.",
     )
     async def vecdlcmd(self, event: Event) -> None:
         args = event.text.split(maxsplit=1)
@@ -312,5 +412,3 @@ class Vector(
                 ]
             ],
         )
-
-

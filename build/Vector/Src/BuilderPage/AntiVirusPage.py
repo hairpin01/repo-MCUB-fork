@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 # local
-from ..Const import _esc
+from urllib.parse import quote
+
+from ..Const import API_BASE, _esc
 
 
 class VectorAntiVirusPageMixin:
@@ -51,6 +53,11 @@ class VectorAntiVirusPageMixin:
             )
         if not sigs and not summary:
             lines.append(f"\n{self.strings('v_aud_no_txt')}")
+        quota = payload.get("quota") or scan.get("quota") or {}
+        if quota.get("remaining") is not None:
+            lines.append(
+                f"\n{self.ICONS['quota']} <i>{self.strings('v_aud_left', remaining=quota.get('remaining', '?'), limit=quota.get('limit', '?'))}</i>"
+            )
         return "\n".join(lines)
 
     def _build_sec_kbd(
@@ -73,10 +80,18 @@ class VectorAntiVirusPageMixin:
             )
         kbd.append(
             [
+                self.Button.url(
+                    self.strings["v_btn_code"],
+                    f"{API_BASE}/modules/{quote(owner, safe='')}/{quote(name, safe='')}/source",
+                )
+            ]
+        )
+        kbd.append(
+            [
                 self.Button.inline(
                     self.strings["v_btn_bck"],
-                    self.cb_list,
-                    data=self._cb_data("list", i=i, gl=gl, q=q),
+                    self.cb_nav,
+                    data=self._cb_data("nav", i=i, gl=gl, q=q, expanded=True),
                 )
             ]
         )

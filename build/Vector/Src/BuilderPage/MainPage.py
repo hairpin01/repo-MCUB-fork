@@ -86,6 +86,7 @@ class VectorMainPageMixin:
             "likes": int(raw.get("likes") or 0),
             "dislikes": int(raw.get("dislikes") or 0),
             "banner": raw.get("banner"),
+            "tags": raw.get("tags") or [],
             "source_url": raw.get("source_url")
             or f"{API_BASE}/modules/{quote(raw.get('source_owner', 'unknown'), safe='')}/{quote(name, safe='')}/source",
             "dl_url": raw.get("source_url")
@@ -164,11 +165,18 @@ class VectorMainPageMixin:
         if description and description.strip():
             desc_text = _esc(description.strip()[:200])
             parts.append(
-                f"<blockquote expandable>{self.ICONS['description']} info\n{desc_text}</blockquote>"
+                f"<blockquote expandable>{self.ICONS['description']} {self.strings('v_info')}\n{desc_text}</blockquote>"
             )
         else:
             parts.append(
-                f"<blockquote>{self.ICONS['description']} info\n\u2014</blockquote>"
+                f"<blockquote>{self.ICONS['description']} {self.strings('v_info')}\n\u2014</blockquote>"
+            )
+
+        tags = [str(tag).strip() for tag in item.get("tags", []) if str(tag).strip()]
+        if tags:
+            tag_text = ", ".join(f"<code>{_esc(tag)}</code>" for tag in tags[:12])
+            parts.append(
+                f"<blockquote expandable>{self.ICONS['stats']} {self.strings('v_tags')}\n{tag_text}</blockquote>"
             )
 
         # commands block
@@ -206,22 +214,22 @@ class VectorMainPageMixin:
                 f"\n{self.strings('v_hid_cmd', rem=str(hidden))}" if hidden > 0 else ""
             )
             parts.append(
-                f"<blockquote expandable>{self.ICONS['command']} usage\n{chr(10).join(cmd_lines)}{extra}</blockquote>"
+                f"<blockquote expandable>{self.ICONS['command']} {self.strings('v_cmds')}\n{chr(10).join(cmd_lines)}{extra}</blockquote>"
             )
         else:
             parts.append(
-                f"<blockquote>{self.ICONS['command']} usage\n\u2014</blockquote>"
+                f"<blockquote>{self.ICONS['command']} {self.strings('v_cmds')}\n\u2014</blockquote>"
             )
 
         # deps block
         if deps:
             dep_str = ", ".join(f"<code>{_esc(d)}</code>" for d in deps[:8])
             parts.append(
-                f"<blockquote expandable>{self.ICONS['dependency']} deps:\n{dep_str}</blockquote>"
+                f"<blockquote expandable>{self.ICONS['dependency']} {self.strings('v_deps')}\n{dep_str}</blockquote>"
             )
         else:
             parts.append(
-                f"<blockquote>{self.ICONS['dependency']} deps:\n\u2014</blockquote>"
+                f"<blockquote>{self.ICONS['dependency']} {self.strings('v_deps')}\n\u2014</blockquote>"
             )
 
         return "\n".join(parts)
@@ -288,17 +296,23 @@ class VectorMainPageMixin:
                     self.Button.inline(
                         "\u25c0\ufe0f",
                         self.cb_nav,
-                        data=self._cb_data("nav", i=prev_i, gl=gl, q=q),
+                        data=self._cb_data(
+                            "nav", i=prev_i, gl=gl, q=q, expanded=expanded, cp=comments_pg
+                        ),
                     ),
                     self.Button.inline(
-                        f"\u2022{i + 1}/{gl}\u2022",
+                        self.strings("v_page", idx=i + 1, total=gl),
                         self.cb_list,
-                        data=self._cb_data("list", i=i, gl=gl, q=q),
+                        data=self._cb_data(
+                            "list", i=i, gl=gl, q=q, expanded=expanded, cp=comments_pg
+                        ),
                     ),
                     self.Button.inline(
                         "\u25b6\ufe0f",
                         self.cb_nav,
-                        data=self._cb_data("nav", i=next_i, gl=gl, q=q),
+                        data=self._cb_data(
+                            "nav", i=next_i, gl=gl, q=q, expanded=expanded, cp=comments_pg
+                        ),
                     ),
                 ]
             )
