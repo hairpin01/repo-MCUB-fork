@@ -1,114 +1,73 @@
-# scop: inline
 # SPDX-License-Identifier: MIT
-
+"""Named MCUB control requests without kernel or command access."""
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Callable, Mapping
+
+from OpenAgentLib.PluginSDK import CapabilityClient, CapabilityFamily, PluginManifest, PluginToolDeclaration
+from OpenAgentLib.ToolCompatibility import TOOL_COMPATIBILITY_MATRIX
+from OpenAgentLib.ToolKernel import ToolCall
 
 
-class McubPlugin:
-    name = "mcub"
-    version = "0.2.0"
-    author = "@dev_dolbaeb"
-    description = "MCUB kernel command tools"
+_CONFIG_KEYS = ("openagent.system_prompt", "openagent.eval_timeout", "openagent.task_background_enabled", "openagent.task_background_max")
+_EMPTY_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+_COMMAND_SCHEMA = {"type": "object", "properties": {"operation": {"type": "string", "enum": ["module-list", "module-reload"]}}, "required": ["operation"], "additionalProperties": False}
+_INSTALL_SCHEMA = {"type": "object", "properties": {"module_url": {"type": "string"}}, "required": ["module_url"], "additionalProperties": False}
+_CONFIG_VALUE_SCHEMA = {"type": "object", "properties": {"json": {"type": "string"}}, "required": ["json"], "additionalProperties": False}
+_CONFIG_SCHEMA = {"type": "object", "properties": {"operation": {"type": "string", "enum": ["get", "set"]}, "key": {"type": "string", "enum": list(_CONFIG_KEYS)}, "value": _CONFIG_VALUE_SCHEMA}, "required": ["operation", "key"], "additionalProperties": False}
+_OUTPUT_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}, "operation": {"type": "string"}, "data": {"type": "object"}}, "required": ["ok", "operation", "data"], "additionalProperties": False}
 
-    tool_registry = (
-        "mcub.command",
-        "mcub.config",
-        "mcub.modules",
-        "mcub.install",
-        "mcub.reload",
-    )
 
-    dangerous_tools = {"mcub.command", "mcub.install", "mcub.reload"}
+def _declaration(tool_id: str, schema: Mapping[str, Any], description: str) -> PluginToolDeclaration:
+    entry = next(item for item in TOOL_COMPATIBILITY_MATRIX if item.canonical_id == tool_id)
+    return PluginToolDeclaration(entry.canonical_id, aliases=entry.aliases, input_schema=schema, output_schema=_OUTPUT_SCHEMA, capabilities=frozenset({entry.capability_class}), description=description, confirmation=entry.confirmation_class, concurrency=entry.concurrency_class, idempotency=entry.idempotency_class, migration_disposition=entry.migration_disposition)
 
-    tool_docs = {
-        "mcub.command": {
-            "desc": "Execute any MCUB userbot command",
-            "args": "command (str) or cmd (str) — command text (prefix auto-added)",
-            "body": "command text",
-            "returns": "Confirmation text with the performed action details, or an error message.",
-            "example": "{\"tool\": \"mcub.command\", \"args\": {\"command\": \"ping\"}}",
-            "notes": "Userbot command prefix is added automatically when needed.",
-        },
-        "mcub.config": {
-            "desc": "Get or set MCUB module configuration",
-            "args": "command (str) or query (str) — config command like 'module.key=value'",
-            "body": "config command",
-            "returns": "Text result with the requested data, or an error message.",
-            "example": "{\"tool\": \"mcub.config\", \"args\": {\"query\": \"OpenAgent.system_prompt\"}}",
-            "notes": "Userbot command prefix is added automatically when needed.",
-        },
-        "mcub.modules": {
-            "desc": "List loaded MCUB modules",
-            "args": "command (str) or query (str)",
-            "body": "not used",
-            "returns": "Text result with the requested data, or an error message.",
-            "example": "{\"tool\": \"mcub.modules\", \"args\": {}}",
-            "notes": "Userbot command prefix is added automatically when needed.",
-        },
-        "mcub.install": {
-            "desc": "Install a module from a repo URL",
-            "args": "command (str) or query (str) — module URL or name",
-            "body": "URL or name",
-            "returns": "Confirmation text with the performed action details, or an error message.",
-            "example": "{\"tool\": \"mcub.install\", \"args\": {\"query\": \"https://example.com/module.py\"}}",
-            "notes": "Userbot command prefix is added automatically when needed.",
-        },
-        "mcub.reload": {
-            "desc": "Reload all modules (equivalent to .restart)",
-            "args": "none",
-            "body": "not used",
-            "returns": "Confirmation text with the performed action details, or an error message.",
-            "example": "{\"tool\": \"mcub.reload\", \"args\": {}}",
-            "notes": "Userbot command prefix is added automatically when needed.",
-        },
-    }
 
-    tool_map = {
-        "mcub": "cmd_mcub",
-        "mcub.command": "cmd_mcub",
-        "mcub.config": "cmd_mcub",
-        "mcub.modules": "cmd_mcub",
-        "mcub.install": "cmd_mcub",
-        "mcub.reload": "cmd_mcub",
-    }
+def _response(capability: CapabilityClient, operation: str, payload: Mapping[str, Any], call: ToolCall) -> Mapping[str, Any]:
+    response = capability.request(CapabilityFamily.MCUB_CONTROL, operation, payload, f"{call.call_id}:mcub:{operation}")
+    if response.get("ok") is not True or not isinstance(response.get("data"), Mapping):
+        raise ValueError("MCUB control request was denied")
+    return {"ok": True, "operation": operation, "data": dict(response["data"])}
 
-    def __init__(self, agent: Any) -> None:
-        self.agent = agent
-    
-    async def cmd_mcub(self, tool_name: str, attrs_raw: str, body: str, source_event: Any) -> str:
-        command_map = {
-            "mcub.modules": "modules",
-            "mcub.config": "cfg",
-            "mcub.install": "dlm",
-            "mcub.reload": "restart",
-        }
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-        command = (
-            command_map.get(tool_name, "")
-            or attrs.get("command")
-            or attrs.get("cmd")
-            or attrs.get("text")
-            or attrs.get("query")
-            or body.strip()
-        )
-        command = command.strip()
-        if not command:
-            return "Empty MCUB command"
-        prefix = getattr(self.agent.kernel, "custom_prefix", ".") or "."
-        if not command.startswith(prefix):
-            command = prefix + command
-        
-        cmd_name = command[len(prefix):].split(maxsplit=1)[0].lower()
-        if cmd_name in {"oa", "agent"}:
-            return "Blocked recursive OpenAgent command"
-        
-        event = self.agent._MCUBEvent(self.agent, source_event, command)
+
+def _command(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    return _response(capability, call.arguments["operation"], {}, call)
+
+
+def _config(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    operation = call.arguments["operation"]
+    if operation == "set" and "value" not in call.arguments:
+        raise ValueError("config-set requires an explicit JSON value")
+    payload = {"key": call.arguments["key"]}
+    if operation == "set":
         try:
-            handled = await self.agent.kernel.process_command(event)
-        except Exception as exc:
-            await self.agent.kernel.handle_error(exc, source="OpenAgent:mcub", event=source_event)
-            return f"MCUB command failed: {exc}"
-        output = event.output or f"Command handled: {handled}"
-        return output[-6000:]
+            payload["value"] = json.loads(call.arguments["value"]["json"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("config-set requires a JSON value") from exc
+    return _response(capability, f"config-{operation}", payload, call)
+
+
+def _modules(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    return _response(capability, "module-list", {}, call)
+
+
+def _install(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    return _response(capability, "module-install", {"module_url": call.arguments["module_url"]}, call)
+
+
+def _reload(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    return _response(capability, "module-reload", {}, call)
+
+
+_TOOLS = (
+    _declaration("mcub.command", _COMMAND_SCHEMA, "Run one named safe MCUB control operation."),
+    _declaration("mcub.config", _CONFIG_SCHEMA, "Read or write one allowlisted OpenAgent configuration key."),
+    _declaration("mcub.modules", _EMPTY_SCHEMA, "List MCUB modules."),
+    _declaration("mcub.install", _INSTALL_SCHEMA, "Install a module from a credential-free HTTPS URL."),
+    _declaration("mcub.reload", _EMPTY_SCHEMA, "Reload MCUB modules."),
+)
+MANIFEST = PluginManifest("openagent.mcub", "2.0.0", "2", "plugins.mcub.HANDLERS", _TOOLS, frozenset({"runtime-control"}))
+HANDLERS: Mapping[str, Callable[[ToolCall, CapabilityClient], Mapping[str, Any]]] = {"mcub.command": _command, "mcub.config": _config, "mcub.modules": _modules, "mcub.install": _install, "mcub.reload": _reload}
+PLUGIN_MANIFEST = MANIFEST
+TOOL_HANDLERS = HANDLERS
