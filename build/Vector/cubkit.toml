@@ -1,8 +1,37 @@
+format = 2
+
+[module]
 id = 'vector'
+scope = 'inline'
+
+[bundle]
 entrypoint = 'VectorMain.py'
-src = 'Src'
-out = '../../Vector-MCUB-repo.py'
-scop = 'inline'
+source = 'Src'
+debug_output = 'dist/VecDebug.py'
+release_output = 'dist/Vector-MCUB-repo.py'
+packages = ['Button', 'Http', 'BuilderPage']
+fail_on_secrets = true
+
+[hooks]
+pre_check = [
+    ['cubkit', 'lint', '.'],
+]
+pre_build = [
+    ['cubkit', 'lint', '.'],
+]
+
+[hooks.debug]
+post_build = ['python', 'Scripts/notify_build.py']
+
+[hooks.release]
+post_build = [
+    [
+        'python',
+        'Scripts/copy_release.py',
+        '{output}',
+        '../repo-MCUB-fork/Vector-MCUB-repo.py',
+    ],
+    ['python', 'Scripts/notify_build.py'],
+]
 
 
-package = ['Button', 'Http', 'BuilderPage']
