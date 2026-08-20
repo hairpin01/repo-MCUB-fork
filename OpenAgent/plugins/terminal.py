@@ -1,146 +1,180 @@
-# scop: inline
 # SPDX-License-Identifier: MIT
-
+"""Least-privilege terminal and workspace inspection tools."""
 from __future__ import annotations
 
-import asyncio
-import re
-from typing import Any
+from typing import Any, Callable, Mapping
+
+from OpenAgentLib.PluginSDK import CapabilityClient, PluginManifest
+from OpenAgentLib.ToolKernel import ToolCall
+
+from ._resource_v2 import bounded_text, declaration, grant_relative_path, required_text, response_data
 
 
-class TerminalPlugin:
-    name = "terminal"
-    version = "0.2.0"
-    author = "@dev_dolbaeb"
-    description = "CLI shell and file system tools"
+_MAX_ARGUMENTS = 32
+_MAX_ARGUMENT_LENGTH = 4_096
+_TIMEOUT_SECONDS = 30
+_MAX_OUTPUT_BYTES = 12_000
+_ALLOWED_EXECUTABLES = frozenset({
+    "cat", "echo", "grep", "head", "ls", "pwd", "tail", "wc",
+})
 
-    tool_registry = (
-        "terminal.run",
-        "terminal.inspect",
-        "terminal.list_files",
-        "terminal.read_file",
-        "terminal.git_status",
+_EMPTY_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+_PATH_SCHEMA = {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False}
+_RUN_SCHEMA = {
+    "type": "object",
+    "properties": {"argv": {"type": "array", "items": {"type": "string"}}, "cwd": {"type": "string"}},
+    "required": ["argv", "cwd"],
+    "additionalProperties": False,
+}
+_INSPECT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "operation": {"type": "string", "enum": ["git-status", "git-diff-stat"]},
+        "cwd": {"type": "string"},
+    },
+    "required": ["operation", "cwd"],
+    "additionalProperties": False,
+}
+_PROCESS_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean"}, "exit_code": {"type": "integer"},
+        "stdout": {"type": "string"}, "stderr": {"type": "string"}, "truncated": {"type": "boolean"},
+    },
+    "required": ["ok", "exit_code", "stdout", "stderr", "truncated"],
+    "additionalProperties": False,
+}
+_READ_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"ok": {"type": "boolean"}, "content": {"type": "string"}, "truncated": {"type": "boolean"}},
+    "required": ["ok", "content", "truncated"],
+    "additionalProperties": False,
+}
+_LIST_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"ok": {"type": "boolean"}, "entries": {"type": "array", "items": {"type": "string"}}},
+    "required": ["ok", "entries"],
+    "additionalProperties": False,
+}
+
+
+def _bounded_argv(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not value or len(value) > _MAX_ARGUMENTS:
+        raise ValueError("argv must contain between one and 32 arguments")
+    if any(not isinstance(arg, str) or not arg or len(arg) > _MAX_ARGUMENT_LENGTH or "\x00" in arg for arg in value):
+        raise ValueError("argv contains an invalid argument")
+    argv = tuple(value)
+    if argv[0] not in _ALLOWED_EXECUTABLES:
+        raise ValueError("executable is not allowlisted")
+    executable, arguments = argv[0], argv[1:]
+    if executable == "echo":
+        return argv
+    if executable == "pwd":
+        if arguments:
+            raise ValueError("pwd does not accept arguments")
+        return argv
+    if executable == "ls":
+        return ("ls", "--", *(grant_relative_path(path, allow_root=True, field="argv path") for path in arguments))
+    if executable == "grep":
+        if len(arguments) < 2:
+            raise ValueError("grep requires a pattern and at least one grant-relative path")
+        pattern, *paths = arguments
+        return ("grep", "--", pattern, *(grant_relative_path(path, allow_root=True, field="argv path") for path in paths))
+    if not arguments:
+        raise ValueError(f"{executable} requires at least one grant-relative path")
+    return (executable, "--", *(grant_relative_path(path, allow_root=True, field="argv path") for path in arguments))
+
+
+def _process_result(response: Mapping[str, Any]) -> Mapping[str, Any]:
+    data = response_data(response)
+    stdout, stdout_truncated = bounded_text(required_text(data, "stdout"))
+    stderr, stderr_truncated = bounded_text(required_text(data, "stderr"))
+    exit_code = data.get("exit_code")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        raise ValueError("process response exit_code must be an integer")
+    return {
+        "ok": True,
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "truncated": bool(data.get("truncated", False) or stdout_truncated or stderr_truncated),
+    }
+
+
+def _run(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    argv = _bounded_argv(call.arguments["argv"])
+    cwd = grant_relative_path(call.arguments["cwd"], allow_root=True, field="cwd")
+    response = capability.process(
+        argv,
+        f"{call.call_id}:terminal.run",
+        cwd=cwd,
+        timeout_seconds=_TIMEOUT_SECONDS,
+        max_output_bytes=_MAX_OUTPUT_BYTES,
     )
+    return _process_result(response)
 
-    tool_map = {
-        "terminal": "cmd_run",
-        "terminal.run": "cmd_run",
-        "terminal.inspect": "cmd_inspect",
-        "terminal.list_files": "cmd_list_files",
-        "terminal.read_file": "cmd_read_file",
-        "terminal.git_status": "cmd_git_status",
-    }
 
-    dangerous_tools = {"terminal.run", "terminal.inspect"}
+def _inspect(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    cwd = grant_relative_path(call.arguments["cwd"], allow_root=True, field="cwd")
+    argv = ("git", "status", "--short") if call.arguments["operation"] == "git-status" else ("git", "diff", "--stat")
+    response = capability.process(
+        argv,
+        f"{call.call_id}:terminal.inspect",
+        cwd=cwd,
+        timeout_seconds=_TIMEOUT_SECONDS,
+        max_output_bytes=_MAX_OUTPUT_BYTES,
+    )
+    return _process_result(response)
 
-    tool_docs = {
-        "terminal.run": {
-            "desc": "Run any shell command on the server",
-            "args": "command (str) or cmd (str) — shell command to execute",
-            "body": "command text",
-            "returns": "Confirmation text with the performed action details, or an error message.",
-            "example": "{\"tool\": \"terminal.run\", \"args\": {\"command\": \"pwd\"}}",
-            "notes": "Runs on the server workspace; avoid interactive commands.",
-        },
-        "terminal.inspect": {
-            "desc": "Run an arbitrary shell command to inspect system state",
-            "args": "command (str) or cmd (str) — command to run",
-            "body": "command text",
-            "returns": "Confirmation text with the performed action details, or an error message.",
-            "example": "{\"tool\": \"terminal.inspect\", \"args\": {\"command\": \"git status --short\"}}",
-            "notes": "Runs on the server workspace; avoid interactive commands.",
-        },
-        "terminal.list_files": {
-            "desc": "List files and directories in a folder",
-            "args": "path (str) — directory path (default: .)",
-            "body": "path text",
-            "returns": "Text result with the requested data, or an error message.",
-            "example": "{\"tool\": \"terminal.list_files\", \"args\": {\"path\": \".\"}}",
-            "notes": "Runs on the server workspace; avoid interactive commands.",
-        },
-        "terminal.read_file": {
-            "desc": "Read a file (UTF-8, first 12k chars)",
-            "args": "path (str) or file (str) — file to read",
-            "body": "path text",
-            "returns": "Text result with the requested data, or an error message.",
-            "example": "{\"tool\": \"terminal.read_file\", \"args\": {\"path\": \"README.md\"}}",
-            "notes": "Runs on the server workspace; avoid interactive commands.",
-        },
-        "terminal.git_status": {
-            "desc": "Show git status of the workspace",
-            "args": "none",
-            "body": "not used",
-            "returns": "Text result with the requested data, or an error message.",
-            "example": "{\"tool\": \"terminal.git_status\", \"args\": {}}",
-            "notes": "Runs on the server workspace; avoid interactive commands.",
-        },
-    }
 
-    config_defaults = {
-        "terminal_enabled": True,
-        "terminal_steps": 3,
-        "terminal_timeout": 30,
-    }
+def _list_files(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    path = grant_relative_path(call.arguments["path"], allow_root=True)
+    data = response_data(capability.filesystem("list", path, f"{call.call_id}:terminal.list"))
+    entries = data.get("entries", ())
+    if not isinstance(entries, (list, tuple)) or len(entries) > 2_000 or any(not isinstance(entry, str) for entry in entries):
+        raise ValueError("filesystem list response is invalid")
+    return {"ok": True, "entries": list(entries)}
 
-    def __init__(self, agent: Any) -> None:
-        self._agent = agent
 
-    @property
-    def agent(self) -> Any:
-        return self._agent
+def _read_file(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    path = grant_relative_path(call.arguments["path"])
+    data = response_data(capability.filesystem("read", path, f"{call.call_id}:terminal.read"))
+    content, truncated = bounded_text(data.get("content", ""))
+    return {"ok": True, "content": content, "truncated": bool(data.get("truncated", False) or truncated)}
 
-    async def on_load(self) -> None:
-        pass
 
-    async def cmd_run(self, attrs_raw: str = "", body: str = "") -> str:
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-        command = attrs.get("command") or attrs.get("cmd") or body.strip()
-        if not command:
-            return "Command is required"
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=self.agent._workspace_dir(),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=int(self.agent.config["terminal_timeout"])
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            return f"Command timed out after {self.agent.config['terminal_timeout']}s"
+def _git_status(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    response = capability.process(
+        ("git", "status", "--short"),
+        f"{call.call_id}:terminal.git-status",
+        cwd=".",
+        timeout_seconds=_TIMEOUT_SECONDS,
+        max_output_bytes=_MAX_OUTPUT_BYTES,
+    )
+    return _process_result(response)
 
-        out = stdout.decode("utf-8", errors="replace")
-        err = stderr.decode("utf-8", errors="replace")
-        result = f"exit_code={proc.returncode}\n"
-        if out:
-            result += f"stdout:\n{out}\n"
-        if err:
-            result += f"stderr:\n{err}\n"
-        return result[-6000:]
 
-    async def cmd_inspect(self, tool_name: str, attrs_raw: str, body: str) -> str:
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-        command = body.strip() or attrs.get("command") or attrs.get("cmd") or "pwd"
-        return await self.cmd_run(command)
-
-    async def cmd_list_files(self, tool_name: str, attrs_raw: str, body: str) -> str:
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-        path = attrs.get("path") or body.strip() or "."
-        return await self.cmd_run(
-            f"python - <<'PY'\nfrom pathlib import Path\np=Path({path!r})\nprint('\\n'.join(sorted(x.name + ('/' if x.is_dir() else '') for x in p.iterdir())))\nPY"
-        )
-
-    async def cmd_read_file(self, tool_name: str, attrs_raw: str, body: str) -> str:
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-        path = attrs.get("path") or attrs.get("file") or body.strip()
-        if not path:
-            return "path is required"
-        return await self.cmd_run(
-            f"python - <<'PY'\nfrom pathlib import Path\np=Path({path!r})\nprint(p.read_text(encoding='utf-8', errors='replace')[:12000])\nPY"
-        )
-
-    async def cmd_git_status(self, tool_name: str, attrs_raw: str, body: str) -> str:
-        return await self.cmd_run("git status --short")
+_TOOLS = (
+    declaration("terminal.run", _RUN_SCHEMA, _PROCESS_OUTPUT_SCHEMA, "Run a bounded argv command in the granted workspace."),
+    declaration("terminal.inspect", _INSPECT_SCHEMA, _PROCESS_OUTPUT_SCHEMA, "Inspect granted Git metadata without arbitrary commands."),
+    declaration("terminal.list_files", _PATH_SCHEMA, _LIST_OUTPUT_SCHEMA, "List a granted workspace directory."),
+    declaration("terminal.read_file", _PATH_SCHEMA, _READ_OUTPUT_SCHEMA, "Read a granted workspace file."),
+    declaration("terminal.git_status", _EMPTY_SCHEMA, _PROCESS_OUTPUT_SCHEMA, "Show granted workspace Git status."),
+)
+MANIFEST = PluginManifest(
+    plugin_id="openagent.terminal",
+    version="2.0.0",
+    api_version="2",
+    entrypoint="plugins.terminal.HANDLERS",
+    tools=_TOOLS,
+    capabilities=frozenset({capability for tool in _TOOLS for capability in tool.capabilities}),
+)
+HANDLERS: Mapping[str, Callable[[ToolCall, CapabilityClient], Mapping[str, Any]]] = {
+    "terminal.run": _run,
+    "terminal.inspect": _inspect,
+    "terminal.list_files": _list_files,
+    "terminal.read_file": _read_file,
+    "terminal.git_status": _git_status,
+}
+PLUGIN_MANIFEST = MANIFEST
+TOOL_HANDLERS = HANDLERS

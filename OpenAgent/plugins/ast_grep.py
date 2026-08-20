@@ -1,252 +1,150 @@
-# scop: inline
 # SPDX-License-Identifier: MIT
-
+"""AST-grep tools executed only through bounded process capabilities."""
 from __future__ import annotations
 
-import asyncio
-import shlex
-import shutil
-import subprocess
-from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
+
+from OpenAgentLib.PluginSDK import CapabilityClient, PluginManifest
+from OpenAgentLib.ToolKernel import ToolCall
+
+from ._resource_v2 import bounded_text, declaration, grant_relative_path, required_text, response_data
 
 
-class AstGrepPlugin:
-    name = "ast_grep"
-    version = "0.1.0"
-    author = "@hairpin01"
-    description = "Structural code search and rewrite tools powered by ast-grep"
+_AST_GREP = "ast-grep"
+_MAX_PATTERN_LENGTH = 8_192
+_MAX_GLOBS = 32
+_MAX_GLOB_LENGTH = 256
+_TIMEOUT_SECONDS = 30
+_MAX_OUTPUT_BYTES = 24_000
+_LANGUAGES = [
+    "bash", "c", "cpp", "csharp", "css", "go", "html", "java", "javascript", "json", "kotlin",
+    "php", "python", "ruby", "rust", "swift", "tsx", "typescript", "yaml",
+]
 
-    tool_registry = (
-        "ast_grep.search",
-        "ast_grep.replace",
+_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pattern": {"type": "string"}, "lang": {"type": "string", "enum": _LANGUAGES},
+        "path": {"type": "string"}, "globs": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["pattern", "lang", "path"],
+    "additionalProperties": False,
+}
+_REPLACE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pattern": {"type": "string"}, "rewrite": {"type": "string"},
+        "lang": {"type": "string", "enum": _LANGUAGES}, "path": {"type": "string"},
+        "globs": {"type": "array", "items": {"type": "string"}}, "apply": {"type": "boolean"},
+    },
+    "required": ["pattern", "rewrite", "lang", "path"],
+    "additionalProperties": False,
+}
+_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean"}, "exit_code": {"type": "integer"}, "result": {"type": "string"},
+        "truncated": {"type": "boolean"}, "applied": {"type": "boolean"},
+    },
+    "required": ["ok", "exit_code", "result", "truncated", "applied"],
+    "additionalProperties": False,
+}
+
+
+def _bounded_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > _MAX_PATTERN_LENGTH or "\x00" in value:
+        raise ValueError(f"{field} must be bounded non-empty text")
+    return value
+
+
+def _globs(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)) or len(value) > _MAX_GLOBS:
+        raise ValueError("globs must be a bounded string array")
+    if any(
+        not isinstance(glob, str)
+        or not glob
+        or len(glob) > _MAX_GLOB_LENGTH
+        or "\x00" in glob
+        or glob.startswith("/")
+        or "\\" in glob
+        or ".." in glob.split("/")
+        for glob in value
+    ):
+        raise ValueError("glob must be bounded non-empty text")
+    return tuple(value)
+
+
+def _argv(arguments: Mapping[str, Any], *, rewrite: bool) -> tuple[str, ...]:
+    pattern = _bounded_string(arguments["pattern"], "pattern")
+    path = grant_relative_path(arguments["path"])
+    argv: list[str] = [_AST_GREP, "run", "--pattern", pattern, "--lang", arguments["lang"], "--json=compact"]
+    for glob in _globs(arguments.get("globs")):
+        argv.extend(("--globs", glob))
+    if rewrite:
+        argv.extend(("--rewrite", _bounded_string(arguments["rewrite"], "rewrite")))
+        if arguments.get("apply", False):
+            argv.append("--update-all")
+    argv.append(path)
+    return tuple(argv)
+
+
+def _result(response: Mapping[str, Any], *, applied: bool) -> Mapping[str, Any]:
+    data = response_data(response)
+    exit_code = data.get("exit_code")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        raise ValueError("process response exit_code must be an integer")
+    stdout, stdout_truncated = bounded_text(required_text(data, "stdout"), _MAX_OUTPUT_BYTES)
+    stderr, stderr_truncated = bounded_text(required_text(data, "stderr"), _MAX_OUTPUT_BYTES)
+    result = stdout if stdout else stderr
+    return {
+        "ok": True,
+        "exit_code": exit_code,
+        "result": result,
+        "truncated": bool(data.get("truncated", False) or stdout_truncated or stderr_truncated),
+        "applied": applied,
+    }
+
+
+def _search(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    response = capability.process(
+        _argv(call.arguments, rewrite=False),
+        f"{call.call_id}:ast-grep.search",
+        cwd=".",
+        timeout_seconds=_TIMEOUT_SECONDS,
+        max_output_bytes=_MAX_OUTPUT_BYTES,
     )
+    return _result(response, applied=False)
 
-    dangerous_tools = {"ast_grep.replace", "astgrep.replace"}
 
-    tool_docs = {
-        "ast_grep.search": {
-            "desc": "Search source code by AST pattern using ast-grep",
-            "args": "pattern (str); lang/language (str); path/paths (str, default '.'); glob/globs (str); json (bool|string)",
-            "body": "pattern text when pattern attr is omitted",
-            "returns": "ast-grep matches, JSON output, or an error message.",
-            "example": "{\"tool\": \"ast_grep.search\", \"args\": {\"lang\": \"python\", \"pattern\": \"print($$$)\", \"path\": \".\"}}",
-            "notes": "Requires ast-grep CLI (`ast-grep` or compatible `sg`) installed on the server.",
-        },
-        "ast_grep.replace": {
-            "desc": "Preview or apply AST-based rewrites using ast-grep",
-            "args": "pattern (str); rewrite/replace (str); lang/language (str); path/paths (str); glob/globs (str); apply/update (bool, default false)",
-            "body": "optional 'pattern -> rewrite' format when attrs are omitted",
-            "returns": "A rewrite diff/summary, command output, or an error message.",
-            "example": "{\"tool\": \"ast_grep.replace\", \"args\": {\"lang\": \"python\", \"pattern\": \"print($X)\", \"rewrite\": \"logger.info($X)\", \"path\": \"src\"}}",
-            "notes": "Dry-run preview is the default; pass apply=true to write changes.",
-        },
-    }
+def _replace(call: ToolCall, capability: CapabilityClient) -> Mapping[str, Any]:
+    applied = bool(call.arguments.get("apply", False))
+    response = capability.process(
+        _argv(call.arguments, rewrite=True),
+        f"{call.call_id}:ast-grep.replace",
+        cwd=".",
+        timeout_seconds=_TIMEOUT_SECONDS,
+        max_output_bytes=_MAX_OUTPUT_BYTES,
+    )
+    return _result(response, applied=applied)
 
-    tool_map = {
-        "ast_grep": "cmd_search",
-        "ast_grep.search": "cmd_search",
-        "astgrep.search": "cmd_search",
-        "ast_grep.replace": "cmd_replace",
-        "astgrep.replace": "cmd_replace",
-    }
 
-    config_defaults = {
-        "ast_grep_timeout": 30,
-        "ast_grep_output_limit": 12000,
-    }
-
-    def __init__(self, agent: Any) -> None:
-        self.agent = agent
-        self._binary: str | None = None
-
-    def _workspace_dir(self) -> Path:
-        workspace = getattr(self.agent, "_workspace_dir", None)
-        if callable(workspace):
-            return Path(workspace())
-        return Path.cwd()
-
-    def _trim(self, text: str) -> str:
-        try:
-            limit = int(self.agent.config["ast_grep_output_limit"])
-        except Exception:
-            limit = 12000
-        if len(text) <= limit:
-            return text
-        return text[:limit] + "\n...[truncated]"
-
-    def _bool_attr(self, value: object, default: bool = False) -> bool:
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in {"1", "yes", "true", "on", "apply", "update"}
-
-    def _split_values(self, value: object, default: tuple[str, ...] = ()) -> list[str]:
-        if value is None:
-            return list(default)
-        if isinstance(value, (list, tuple, set)):
-            return [str(item).strip() for item in value if str(item).strip()]
-
-        text = str(value).strip()
-        if not text:
-            return list(default)
-        if "," in text or "\n" in text:
-            return [part.strip() for part in text.replace("\n", ",").split(",") if part.strip()]
-
-        try:
-            parts = shlex.split(text)
-        except ValueError:
-            parts = []
-        return parts or [text]
-
-    def _find_binary(self) -> str | None:
-        if self._binary:
-            return self._binary
-
-        for name in ("ast-grep", "sg"):
-            binary = shutil.which(name)
-            if not binary:
-                continue
-            if name == "sg" and not self._is_ast_grep_binary(binary):
-                continue
-            self._binary = binary
-            return binary
-        return None
-
-    def _is_ast_grep_binary(self, binary: str) -> bool:
-        try:
-            proc = subprocess.run(
-                [binary, "--version"],
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=2,
-            )
-        except Exception:
-            return False
-        output = f"{proc.stdout}\n{proc.stderr}".lower()
-        return "ast-grep" in output
-
-    def _validate_lang(self, lang: str) -> str:
-        lang = (lang or "").strip().lower()
-        if not lang:
-            return ""
-        if not lang.replace("-", "").replace("_", "").isalnum():
-            return ""
-        return lang
-
-    def _resolve_existing_paths(self, raw_paths: object) -> list[str] | str:
-        workspace = self._workspace_dir()
-        paths = self._split_values(raw_paths, default=(".",))
-        resolved: list[str] = []
-        for path in paths:
-            candidate = Path(path).expanduser()
-            if not candidate.is_absolute():
-                candidate = workspace / candidate
-            if not candidate.exists():
-                return f"Path not found: {path}"
-            try:
-                resolved.append(str(candidate.relative_to(workspace)))
-            except ValueError:
-                resolved.append(str(candidate))
-        return resolved
-
-    def _build_common_args(
-        self,
-        attrs: dict[str, str],
-        body: str,
-        rewrite: str | None = None,
-        update: bool = False,
-    ) -> tuple[list[str], str | None]:
-        binary = self._find_binary()
-        if not binary:
-            return [], "ast-grep CLI not found. Install `ast-grep` or make a compatible `sg` binary available in PATH."
-
-        pattern = attrs.get("pattern") or attrs.get("p") or body.strip()
-        lang = self._validate_lang(attrs.get("lang") or attrs.get("language") or "")
-        if not pattern:
-            return [], "pattern is required"
-        if not lang:
-            return [], "lang/language attribute is required"
-
-        paths = self._resolve_existing_paths(attrs.get("paths") or attrs.get("path") or ".")
-        if isinstance(paths, str):
-            return [], paths
-
-        args = [binary, "run", "--pattern", pattern, "--lang", lang]
-        for glob in self._split_values(attrs.get("globs") or attrs.get("glob")):
-            args.extend(("--globs", glob))
-
-        if rewrite is not None:
-            args.extend(("--rewrite", rewrite))
-            if update:
-                args.append("--update-all")
-
-        json_mode = attrs.get("json") or attrs.get("format")
-        if self._bool_attr(json_mode):
-            args.append("--json=compact")
-        elif str(json_mode or "").strip().lower() in {"compact", "pretty", "stream"}:
-            args.append(f"--json={str(json_mode).strip().lower()}")
-
-        args.extend(paths)
-        return args, None
-
-    async def _run_ast_grep(self, args: list[str]) -> str:
-        try:
-            timeout = int(self.agent.config["ast_grep_timeout"])
-        except Exception:
-            timeout = 30
-
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            cwd=str(self._workspace_dir()),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            return f"ast-grep timed out after {timeout}s"
-
-        out = stdout.decode("utf-8", errors="replace")
-        err = stderr.decode("utf-8", errors="replace")
-        result = f"exit_code={proc.returncode}\n"
-        if out:
-            result += f"stdout:\n{out}\n"
-        if err:
-            result += f"stderr:\n{err}\n"
-        return self._trim(result.rstrip())
-
-    async def cmd_search(self, attrs_raw: str = "", body: str = "") -> str:
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-        args, error = self._build_common_args(attrs, body)
-        if error:
-            return error
-        return await self._run_ast_grep(args)
-
-    async def cmd_replace(self, attrs_raw: str = "", body: str = "") -> str:
-        attrs = self.agent._parse_xml_attrs(attrs_raw)
-
-        if not attrs.get("pattern") and not attrs.get("p") and "->" in body:
-            pattern, rewrite = body.split("->", 1)
-            attrs["pattern"] = pattern.strip()
-            attrs["rewrite"] = rewrite.strip()
-            body = ""
-
-        rewrite = attrs.get("rewrite") or attrs.get("replace") or attrs.get("r") or ""
-        if not rewrite:
-            return "rewrite/replace attribute is required"
-
-        args, error = self._build_common_args(
-            attrs,
-            body,
-            rewrite=rewrite,
-            update=self._bool_attr(attrs.get("apply") or attrs.get("update") or attrs.get("write")),
-        )
-        if error:
-            return error
-
-        return await self._run_ast_grep(args)
+_TOOLS = (
+    declaration("ast_grep.search", _SEARCH_SCHEMA, _OUTPUT_SCHEMA, "Search a granted workspace with exact ast-grep argv."),
+    declaration("ast_grep.replace", _REPLACE_SCHEMA, _OUTPUT_SCHEMA, "Rewrite a granted workspace with exact ast-grep argv."),
+)
+MANIFEST = PluginManifest(
+    plugin_id="openagent.ast_grep",
+    version="2.0.0",
+    api_version="2",
+    entrypoint="plugins.ast_grep.HANDLERS",
+    tools=_TOOLS,
+    capabilities=frozenset({capability for tool in _TOOLS for capability in tool.capabilities}),
+)
+HANDLERS: Mapping[str, Callable[[ToolCall, CapabilityClient], Mapping[str, Any]]] = {
+    "ast_grep.search": _search,
+    "ast_grep.replace": _replace,
+}
+PLUGIN_MANIFEST = MANIFEST
+TOOL_HANDLERS = HANDLERS
