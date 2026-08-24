@@ -14,9 +14,10 @@ _MAX_ARGUMENTS = 32
 _MAX_ARGUMENT_LENGTH = 4_096
 _TIMEOUT_SECONDS = 30
 _MAX_OUTPUT_BYTES = 12_000
-_ALLOWED_EXECUTABLES = frozenset({
-    "cat", "echo", "grep", "head", "ls", "pwd", "tail", "wc",
+_SHELL_EXECUTABLES = frozenset({
+    "sh", "bash", "zsh", "fish", "cmd", "powershell",
 })
+_PATH_EXECUTABLES = frozenset({"cat", "head", "tail", "wc"})
 
 _EMPTY_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
 _PATH_SCHEMA = {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False}
@@ -64,9 +65,11 @@ def _bounded_argv(value: Any) -> tuple[str, ...]:
     if any(not isinstance(arg, str) or not arg or len(arg) > _MAX_ARGUMENT_LENGTH or "\x00" in arg for arg in value):
         raise ValueError("argv contains an invalid argument")
     argv = tuple(value)
-    if argv[0] not in _ALLOWED_EXECUTABLES:
-        raise ValueError("executable is not allowlisted")
     executable, arguments = argv[0], argv[1:]
+    if "/" in executable or "\\" in executable:
+        raise ValueError("executable must be resolved through PATH")
+    if executable.lower() in _SHELL_EXECUTABLES:
+        raise ValueError("shell executables are not allowed")
     if executable == "echo":
         return argv
     if executable == "pwd":
@@ -80,9 +83,11 @@ def _bounded_argv(value: Any) -> tuple[str, ...]:
             raise ValueError("grep requires a pattern and at least one grant-relative path")
         pattern, *paths = arguments
         return ("grep", "--", pattern, *(grant_relative_path(path, allow_root=True, field="argv path") for path in paths))
-    if not arguments:
+    if executable in _PATH_EXECUTABLES and not arguments:
         raise ValueError(f"{executable} requires at least one grant-relative path")
-    return (executable, "--", *(grant_relative_path(path, allow_root=True, field="argv path") for path in arguments))
+    if executable in _PATH_EXECUTABLES:
+        return (executable, "--", *(grant_relative_path(path, allow_root=True, field="argv path") for path in arguments))
+    return argv
 
 
 def _process_result(response: Mapping[str, Any]) -> Mapping[str, Any]:
