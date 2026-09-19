@@ -11,10 +11,6 @@ import os
 import re
 from datetime import datetime, timezone
 
-from telethon import events
-from telethon.tl.patched import Message
-
-
 def _escape_html(text: str) -> str:
     return (
         text.replace("&", "&amp;")
@@ -29,6 +25,8 @@ from core.lib.loader.module_config import (
     ConfigValue,
     Float,
     Integer,
+    Buttons,
+    Row,
     ModuleConfig,
 )
 
@@ -37,6 +35,11 @@ from core.lib.loader.module_base import (
     command,
     event,
     watcher,
+    callback,
+)
+
+from core.lib.types import (
+  Event, Message, InlineMessage
 )
 
 
@@ -45,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 class SourceTriggerMod(ModuleBase):
     name = "SourceTrigger"
-    version = "1.1.4-beta"
+    version = "1.1.5-beta"
     author = "@RnPlugins"
     description = {
         "ru": "Отправляет медиа/текст из исходного канала в ответ на текстовые триггеры.",
@@ -186,6 +189,25 @@ class SourceTriggerMod(ModuleBase):
             description="Максимальная задержка в секундах для срабатывания триггеров после зависания.",
             validator=Float(default=3.0, min=0.0),
         ),
+        Row(),
+        Buttons(
+          "Debug/Docs",
+          "Документация, и другие штуки",
+          "Debug/Docs",
+          lambda m: [ 
+            # m -> self
+            [
+              m.Button.url("Docs", "http://stm.yufic.ru"),
+              m.Button.url("Example channel", "https://t.me/HyperLinkRn")
+            ],
+            [
+              m.Button.url("Original mod on heroku UB", "https://raw.githubusercontent.com/YouRooni/HerokuModules/refs/heads/main/sourcetrigger.py")
+            ],
+            [
+              m.Button.inline(f"Clear DB (root/{m.name}/*)", m.cb_clear_db, style="danger")
+            ]
+          ],
+        ),
     )
 
     def __init__(self, *args, **kwargs) -> None:
@@ -195,6 +217,18 @@ class SourceTriggerMod(ModuleBase):
         self._edited_msg_ids: set[int] = set()
         self._outgoing_text_cache: dict[int, tuple[str, datetime]] = {}
         self.me = None
+
+    @callback()
+    async def cb_clear_db(self, call: InlineMessage, data=None) -> None:
+      try:
+        keys = await self.db.db_get_module_keys(self.name)
+        for key in keys:
+          await self.db.db_delete(self.name, key)
+        await call.answer("Success")
+      except Exception as e:
+        await call.answer(f"{self.strings("error")("unknown")} {e}")
+        self.log.error(f"Error in cb_clear_db callback: {e}")
+    
 
     def _prune_outgoing_text_cache(self, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -279,7 +313,7 @@ class SourceTriggerMod(ModuleBase):
         pass
 
     @event("messageedited")
-    async def on_message_edited(self, event: events.MessageEdited.Event) -> None:
+    async def on_message_edited(self, event: Event) -> None:
         message = getattr(event, "message", None)
         if not message or not message.out or not message.text:
             return
@@ -505,7 +539,7 @@ class SourceTriggerMod(ModuleBase):
             except Exception:
                 pass
 
-    async def _run_parser(self, event: events.NewMessage.Event | None = None) -> None:
+    async def _run_parser(self, event: Event | None = None) -> None:
         if event:
             await self.edit(event, self.strings("parsing_started"), as_html=True)
         self.triggers.clear()
@@ -866,7 +900,7 @@ class SourceTriggerMod(ModuleBase):
         return False
 
     @watcher()
-    async def trigger_watcher(self, event: events.NewMessage.Event) -> None:
+    async def trigger_watcher(self, event: Event) -> None:
         message = event.message
         if not message.out or not message.text:
             return
@@ -904,7 +938,7 @@ class SourceTriggerMod(ModuleBase):
                 pass
 
     @watcher()
-    async def source_channel_watcher(self, event: events.NewMessage.Event) -> None:
+    async def source_channel_watcher(self, event: Event) -> None:
         source_id = self.config["source_channel_id"]
         if not source_id or event.chat_id != source_id:
             return
@@ -924,11 +958,11 @@ class SourceTriggerMod(ModuleBase):
         await self._save_triggers()
 
     @command("tparse", doc_ru="Сканировать исходный канал для обновления триггеров", doc_en="Scan the source channel to update triggers")
-    async def cmd_tparse(self, event: events.NewMessage.Event) -> None:
+    async def cmd_tparse(self, event: Event) -> None:
         await self._run_parser(event)
 
     @command("tadd", doc_ru="<reply> <trigger> - Добавить новый триггер", doc_en="<reply> <trigger> - Add a new trigger")
-    async def cmd_tadd(self, event: events.NewMessage.Event) -> None:
+    async def cmd_tadd(self, event: Event) -> None:
         reply = await event.get_reply_message()
         if not reply:
             await self.edit(event, self.strings("must_be_reply") + f"\n<code>{_escape_html(event.raw_text)}</code>", as_html=True)
@@ -981,7 +1015,7 @@ class SourceTriggerMod(ModuleBase):
             await self.edit(event, self.strings("add_trigger_error") + f"\n<code>{_escape_html(str(e))}</code>", as_html=True)
 
     @command("tsearch", doc_ru="<query> - Найти триггеры", doc_en="<query> - Search triggers")
-    async def cmd_tsearch(self, event: events.NewMessage.Event) -> None:
+    async def cmd_tsearch(self, event: Event) -> None:
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
         if not args:
@@ -1051,7 +1085,7 @@ class SourceTriggerMod(ModuleBase):
         await self.edit(event, "\n".join(lines), as_html=True)
 
     @command("tignore", doc_ru="[chat_id] - Исключить чат", doc_en="[chat_id] - Ignore chat")
-    async def cmd_tignore(self, event: events.NewMessage.Event) -> None:
+    async def cmd_tignore(self, event: Event) -> None:
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
         chat_id = None
@@ -1081,7 +1115,7 @@ class SourceTriggerMod(ModuleBase):
             await self.edit(event, self.strings("ignore_added").format(chat_id), as_html=True)
 
     @command("tsetsource", doc_ru="[chat_id] - Установить источник триггеров", doc_en="[chat_id] - Set trigger source")
-    async def cmd_tsetsource(self, event: events.NewMessage.Event) -> None:
+    async def cmd_tsetsource(self, event: Event) -> None:
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
         chat_id = None
