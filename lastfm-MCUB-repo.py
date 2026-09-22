@@ -7,7 +7,8 @@
 #           @ke_mods
 # =======================================
 #
-#  LICENSE: CC BY-ND 4.0 (Attribution-NoDerivatives 4.0 International)
+#  LICENSE: CC BY-ND 4.0 (Attribution-NoDerivatives 4.0 International) The license for the original module is fork and port  on MCUB-fork
+#  тока щас увидить що за лицензия
 #  --------------------------------------
 #  https://creativecommons.org/licenses/by-nd/4.0/legalcode
 # =======================================
