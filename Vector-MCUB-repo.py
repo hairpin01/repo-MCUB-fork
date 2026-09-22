@@ -1,11 +1,11 @@
 # name: Vector
-# version: 2.4.4
+# version: 2.4.5
 # scop: inline
 # CubKit build info:
-# CubKit source sha256: 83817d1def5cab763de5e053d9b4413b16cc239467c609632a0780963aa82b6c
+# CubKit source sha256: 1367b09d9238845a2e682b3ec072e0b774baf05ea0454d0b879e274f0e3d9e1e
 # CubKit payload sha256: 7e3ef97c1e6c5c33fd9a8a7dd9b69a987f507666e577e7e9d62ae86f2c5bfe50
 # CubKit source map:
-# - generated line 488 -> VectorMain.py:1
+# - generated line 603 -> VectorMain.py:1
 # - bundled files are extracted from the CubKit payload at import time:
 #   - BuilderPage/AntiVirusPage.py -> AntiVirusPage.py:1 (lines: 98, sha256: 265539ad410b51022894ec9867e0363cd591001082c8fb228542b980d20eeb00)
 #   - BuilderPage/DiscussionPage.py -> DiscussionPage.py:1 (lines: 47, sha256: 3e0713bcccf3dc931dc4dad661d810d96f616427725503f71cf0ebfe3b8d0d77)
@@ -29,9 +29,14 @@ from __future__ import annotations
 # - On import, CubKit verifies the payload SHA256 and extracts it into CUBKIT_CACHE_DIR or ~/.cache/cubkit.
 # - CubKit import-debug comments below explain sys.path/package wiring for private relative imports.
 # - Vendored libraries declared in [libs] are exposed as `cubkit.lib.<name>`.
+# - `load_strings()` returns project locales in MCUB's native class-level format.
+# - Plugin resources and metadata are exposed through `from cubkit import ...`.
 __cubkit_module_id__ = 'vector'
 __cubkit_package_dirs__ = ('Button', 'Http', 'BuilderPage')
 __cubkit_lib_dir__ = '_cubkit_lib'
+__cubkit_assets_dir__ = None
+__cubkit_locales__ = {}
+__cubkit_metadata__ = {'id': 'vector', 'name': 'Vector', 'version': '2.4.5', 'author': 'unknown', 'description': '', 'requires': (), 'banner_url': None, 'scop': 'inline'}
 __cubkit_bundle_sha256__ = '7e3ef97c1e6c5c33fd9a8a7dd9b69a987f507666e577e7e9d62ae86f2c5bfe50'
 __cubkit_bundle_b85__ = """
 P)h>@6aWAK2mk;8Api*$4=;8E0021;000~S002UDX>4R=a!_GsWiLT)bZJ&;a&>c1VP|D7aCyB~OK;ma5Wf3Y5ZZ$*K<i|)HzP`s
@@ -413,20 +418,21 @@ def __cubkit_bootstrap__():
     # It prepares bundled files before the real MCUB module code below runs.
     import base64
     import hashlib
+    import json
     import os
     import sys
     import types
     import zipfile
     from pathlib import Path
+    from types import MappingProxyType
 
-    # CubKit import-debug: decode the embedded base85 zip payload.
+    # CubKit import-debug: decode and verify the embedded zip payload.
     data = base64.b85decode("".join(__cubkit_bundle_b85__.split()).encode("ascii"))
     digest = hashlib.sha256(data).hexdigest()
-    # CubKit import-debug: fail fast if the embedded payload was corrupted.
     if digest != __cubkit_bundle_sha256__:
         raise RuntimeError("CubKit embedded bundle checksum mismatch")
 
-    # CubKit import-debug: cache extraction avoids rewriting helper files on every import.
+    # CubKit import-debug: cache extraction avoids rewriting files on every import.
     cache_root = Path(os.environ.get("CUBKIT_CACHE_DIR", Path.home() / ".cache" / "cubkit"))
     bundle_dir = cache_root / __cubkit_module_id__ / digest
     marker = bundle_dir / ".cubkit-extracted"
@@ -435,6 +441,11 @@ def __cubkit_bootstrap__():
         archive_path = bundle_dir / "bundle.zip"
         archive_path.write_bytes(data)
         with zipfile.ZipFile(archive_path) as archive:
+            resolved_bundle_dir = bundle_dir.resolve()
+            for member in archive.infolist():
+                destination = (bundle_dir / member.filename).resolve()
+                if destination != resolved_bundle_dir and resolved_bundle_dir not in destination.parents:
+                    raise RuntimeError("unsafe path in CubKit embedded bundle")
             archive.extractall(bundle_dir)
         marker.write_text(digest, encoding="utf-8")
 
@@ -443,21 +454,33 @@ def __cubkit_bootstrap__():
     if bundle_path not in sys.path:
         sys.path.insert(0, bundle_path)
 
-    # CubKit import-debug: build private package search paths for `from .utils import ...`.
+    # CubKit import-debug: build private package search paths for relative imports.
     relative_import_paths = [bundle_path]
     for package_dir in reversed(__cubkit_package_dirs__):
         package_path = bundle_dir / package_dir
         if package_path.is_dir():
             relative_import_paths.insert(0, str(package_path))
 
-    # CubKit import-debug: mark the generated main module as package-like.
-    # This prevents accidental imports from global MCUB packages named `utils`, `lib`, etc.
     module_globals = globals()
     module_globals["__path__"] = relative_import_paths
     module_globals["__package__"] = module_globals.get("__name__", __cubkit_module_id__)
     module_spec = module_globals.get("__spec__")
     if module_spec is not None:
         module_spec.submodule_search_locations = relative_import_paths
+
+    def load_strings():
+        import copy
+
+        return copy.deepcopy(__cubkit_locales__)
+
+    # Public build-runtime API used by generated source modules.
+    cubkit_pkg = sys.modules.get("cubkit")
+    if cubkit_pkg is None:
+        cubkit_pkg = types.ModuleType("cubkit")
+        sys.modules["cubkit"] = cubkit_pkg
+    if not hasattr(cubkit_pkg, "__path__"):
+        cubkit_pkg.__path__ = []
+    cubkit_pkg.load_strings = load_strings
 
     # CubKit import-debug: expose vendored libraries through `from cubkit.lib import name`.
     lib_path = bundle_dir / __cubkit_lib_dir__
@@ -466,13 +489,6 @@ def __cubkit_bootstrap__():
         if lib_path_str not in sys.path:
             sys.path.insert(0, lib_path_str)
 
-        cubkit_pkg = sys.modules.get("cubkit")
-        if cubkit_pkg is None:
-            cubkit_pkg = types.ModuleType("cubkit")
-            sys.modules["cubkit"] = cubkit_pkg
-        if not hasattr(cubkit_pkg, "__path__"):
-            cubkit_pkg.__path__ = []
-
         lib_pkg = sys.modules.get("cubkit.lib")
         if lib_pkg is None:
             lib_pkg = types.ModuleType("cubkit.lib")
@@ -480,6 +496,105 @@ def __cubkit_bootstrap__():
         lib_pkg.__path__ = [lib_path_str]
         lib_pkg.__package__ = "cubkit"
         setattr(cubkit_pkg, "lib", lib_pkg)
+
+    class Assets:
+        def __init__(self, root):
+            self.root = root
+
+        @property
+        def available(self):
+            return self.root is not None and self.root.is_dir()
+
+        def _resolve(self, relative_path):
+            if not self.available:
+                raise FileNotFoundError("this CubKit module has no assets directory")
+            root = self.root.resolve()
+            candidate = (root / relative_path).resolve()
+            if candidate != root and root not in candidate.parents:
+                raise ValueError("asset path must stay inside the assets directory")
+            return candidate
+
+        def get(self, relative_path):
+            path = self._resolve(relative_path)
+            if not path.exists():
+                raise FileNotFoundError(path)
+            return path
+
+        def exists(self, relative_path):
+            try:
+                return self._resolve(relative_path).exists()
+            except (FileNotFoundError, ValueError):
+                return False
+
+        def read_bytes(self, relative_path):
+            return self.get(relative_path).read_bytes()
+
+        def read_text(self, relative_path, encoding="utf-8"):
+            return self.get(relative_path).read_text(encoding=encoding)
+
+        def read_json(self, relative_path, encoding="utf-8"):
+            return json.loads(self.read_text(relative_path, encoding=encoding))
+
+        def __bool__(self):
+            return self.available
+
+        def __truediv__(self, relative_path):
+            return self.get(relative_path)
+
+    assets_root = bundle_dir / __cubkit_assets_dir__ if __cubkit_assets_dir__ else None
+    assets = Assets(assets_root)
+    metadata = MappingProxyType(dict(__cubkit_metadata__))
+
+    def resource(relative_path):
+        return assets.get(relative_path)
+
+    environment = MappingProxyType({
+        "root": bundle_dir,
+        "assets": assets,
+        "locales": __cubkit_locales__,
+        "metadata": metadata,
+    })
+
+    def get_environment():
+        return environment
+
+    public_runtime = {
+        "assets": assets,
+        "get_environment": get_environment,
+        "load_strings": load_strings,
+        "metadata": metadata,
+        "resource": resource,
+        "root": bundle_dir,
+    }
+    for public_name, public_value in public_runtime.items():
+        setattr(cubkit_pkg, public_name, public_value)
+    current_exports = list(getattr(cubkit_pkg, "__all__", ()))
+    cubkit_pkg.__all__ = current_exports + [
+        name for name in public_runtime if name not in current_exports
+    ]
+
+    runtime_package = module_globals["__package__"]
+    runtime_name = f"{runtime_package}._cubkit"
+    runtime_module = types.ModuleType(runtime_name)
+    runtime_module.__package__ = runtime_package
+    runtime_module.__file__ = str(bundle_dir / "_cubkit.py")
+    runtime_module.__all__ = (
+        "Assets", "assets", "environment", "get_environment", "load_strings",
+        "locales", "metadata", "resource", "root",
+    )
+    runtime_module.Assets = Assets
+    runtime_module.assets = assets
+    runtime_module.environment = environment
+    runtime_module.get_environment = get_environment
+    runtime_module.load_strings = load_strings
+    runtime_module.locales = __cubkit_locales__
+    runtime_module.metadata = metadata
+    runtime_module.resource = resource
+    runtime_module.root = bundle_dir
+    sys.modules[runtime_name] = runtime_module
+    parent_module = sys.modules.get(runtime_package)
+    if parent_module is not None:
+        setattr(parent_module, "_cubkit", runtime_module)
 
 __cubkit_bootstrap__()
 del __cubkit_bootstrap__
@@ -553,7 +668,7 @@ class Vector(
     ModuleBase,
 ):
     name = "Vector"
-    version = "2.4.4"
+    version = "2.4.5"
     author = "@samsepi0l_ovf"
     description = {
         "en": "Vector module registry browser.\nhttps://www.0xvector.lol",
@@ -675,7 +790,7 @@ class Vector(
             return False
         modules_data: list[dict[str, str]] = []
         lang = self._detect_lang_suffix()
-        for collection_name in ("loaded_modules", "system_modules"):
+        for collection_name in ("loaded_modules_view", "system_modules_view"):
             collection = getattr(self.kernel, collection_name, {}) or {}
             for module in collection.values():
                 module_hash = self._hash_module_source(module)
