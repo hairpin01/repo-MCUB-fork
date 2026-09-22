@@ -67,7 +67,7 @@ class Vector(
     ModuleBase,
 ):
     name = "Vector"
-    version = "2.4.4"
+    version = "2.4.5"
     author = "@samsepi0l_ovf"
     description = {
         "en": "Vector module registry browser.\nhttps://www.0xvector.lol",
@@ -189,7 +189,7 @@ class Vector(
             return False
         modules_data: list[dict[str, str]] = []
         lang = self._detect_lang_suffix()
-        for collection_name in ("loaded_modules", "system_modules"):
+        for collection_name in ("loaded_modules_view", "system_modules_view"):
             collection = getattr(self.kernel, collection_name, {}) or {}
             for module in collection.values():
                 module_hash = self._hash_module_source(module)
