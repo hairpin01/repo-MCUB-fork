@@ -106,8 +106,8 @@ class DNDModule(ModuleBase):
     """Protect private messages and provide configurable AFK statuses."""
 
     name = "dnd-MCUB-repo"
-    version = "2.0.0"
-    author = "unknown"
+    version = "2.0.1"
+    author = "@hikariatama && @Hairpin00"
     description = {"ru": "Unit «SIGMA»", "en": "Unit «SIGMA»"}
     banner_url = "https://github.com/hikariatama/assets/raw/master/unit_sigma.png"
     strings = {"name": "DND"}
@@ -223,6 +223,7 @@ class DNDModule(ModuleBase):
     )
 
     async def on_load(self) -> None:
+        self._me = await self.client.get_me()
         await super().on_load()
         self._temp = {
             "ratelimit_afk": [],
@@ -231,7 +232,6 @@ class DNDModule(ModuleBase):
             "unstatus_task": None,
             "unstatus_clearing": False,
         }
-        self._me = await self.client.get_me()
 
         if self.config["dnd_status"] and self.config["dnd_status_duration"]:
             remaining = self.config["dnd_status_duration"] - int(time.time())
@@ -1040,6 +1040,10 @@ class DNDModule(ModuleBase):
 
     @watcher(incoming=True)
     async def message_watcher(self, event: Event) -> None:
+        if getattr(
+            self, "_me", None
+        ) is None:
+            return
         try:
             chat_id = event.chat_id
             if chat_id in {1271266957, 777000, self._me.id}:
