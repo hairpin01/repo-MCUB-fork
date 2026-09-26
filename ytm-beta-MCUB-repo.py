@@ -44,7 +44,7 @@ STRINGS = {
         "ytm_missing": "He ycтaнoвлeн <code>ytmusicapi</code>.",
         "ytdlp_missing": "He ycтaнoвлeн <code>yt-dlp</code>.",
         "beta_empty": "Иcтopия YouTube Music пycтa или нeдocтyпнa.",
-        "beta_now": "{beta} <b>Now Playing Beta</b>\n\n<b>{title}</b>\n<i>{artist}</i>\n\n{link} <a href=\"{url}\">Open in YouTube Music</a>",
+        "beta_now": '{beta} <b>Now Playing Beta</b>\n\n<b>{title}</b>\n<i>{artist}</i>\n\n{link} <a href="{url}">Open in YouTube Music</a>',
         "beta_note": "Beta: иcпoльзyeтcя пocлeдний тpeк из иcтopии YouTube Music, нe peaльный playback API.",
         "beta_dl": "Cкaчивaю пocлeдний тpeк из beta now playing...",
         "send_error": "He yдaлocь oтпpaвить тpeк:\n<code>{error}</code>",
@@ -69,7 +69,7 @@ STRINGS = {
         "ytm_missing": "<code>ytmusicapi</code> is not installed.",
         "ytdlp_missing": "<code>yt-dlp</code> is not installed.",
         "beta_empty": "YouTube Music history is empty or unavailable.",
-        "beta_now": "{beta} <b>Now Playing Beta</b>\n\n<b>{title}</b>\n<i>{artist}</i>\n\n{link} <a href=\"{url}\">Open in YouTube Music</a>",
+        "beta_now": '{beta} <b>Now Playing Beta</b>\n\n<b>{title}</b>\n<i>{artist}</i>\n\n{link} <a href="{url}">Open in YouTube Music</a>',
         "beta_note": "Beta: this uses the latest item from YouTube Music history, not a real playback API.",
         "beta_dl": "Downloading the latest beta now playing track...",
         "send_error": "Failed to send track:\n<code>{error}</code>",
@@ -82,8 +82,12 @@ def is_youtube_url(value):
         parsed = urlparse(value)
         domain = parsed.netloc.lower()
         return any(
-            token in domain for token in (
-                "youtube.com", "youtu.be", "music.youtube.com", "youtube-nocookie.com"
+            token in domain
+            for token in (
+                "youtube.com",
+                "youtu.be",
+                "music.youtube.com",
+                "youtube-nocookie.com",
             )
         )
     except Exception:
@@ -120,6 +124,7 @@ def register(kernel):
     async def ensure_ytdlp():
         try:
             import yt_dlp
+
             return yt_dlp
         except ImportError:
             return None
@@ -127,6 +132,7 @@ def register(kernel):
     async def ensure_ytmusic():
         try:
             from ytmusicapi import YTMusic
+
             return YTMusic
         except ImportError:
             return None
@@ -157,7 +163,9 @@ def register(kernel):
                 files = []
                 for root, _, names in os.walk(temp_dir):
                     for name in names:
-                        if name.lower().endswith((".m4a", ".mp3", ".webm", ".opus", ".ogg")):
+                        if name.lower().endswith(
+                            (".m4a", ".mp3", ".webm", ".opus", ".ogg")
+                        ):
                             files.append(os.path.join(root, name))
                 if not files:
                     return None, info
@@ -205,12 +213,17 @@ def register(kernel):
                 return
 
             query = raw.strip()
-            await event.edit(f"{EMOJI['load']} <b>{s['downloading']}</b>", parse_mode="html")
+            await event.edit(
+                f"{EMOJI['load']} <b>{s['downloading']}</b>", parse_mode="html"
+            )
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 file_path, info, error = await resolve_and_download(query, temp_dir)
                 if error:
-                    await event.edit(f"{EMOJI['error']} <b>{escape_html(error)}</b>", parse_mode="html")
+                    await event.edit(
+                        f"{EMOJI['error']} <b>{escape_html(error)}</b>",
+                        parse_mode="html",
+                    )
                     return
 
                 title = info.get("title") or "Unknown title"
@@ -224,7 +237,9 @@ def register(kernel):
                     if not ok:
                         thumb_path = None
 
-                await event.edit(f"{EMOJI['music']} <b>{s['sending']}</b>", parse_mode="html")
+                await event.edit(
+                    f"{EMOJI['music']} <b>{s['sending']}</b>", parse_mode="html"
+                )
                 caption = (
                     f"{EMOJI['ok']} <b>{escape_html(title)}</b>\n"
                     f"<i>{escape_html(artist)}</i>\n"
@@ -278,13 +293,19 @@ def register(kernel):
         try:
             item, error = await get_now_playing()
             if error:
-                await event.edit(f"{EMOJI['error']} <b>{escape_html(error)}</b>", parse_mode="html")
+                await event.edit(
+                    f"{EMOJI['error']} <b>{escape_html(error)}</b>", parse_mode="html"
+                )
                 return
 
             video_id = item.get("videoId") or item.get("videoId".lower())
             title = item.get("title") or "Unknown title"
             artist = _pick_artist(item)
-            url = f"https://music.youtube.com/watch?v={video_id}" if video_id else "https://music.youtube.com"
+            url = (
+                f"https://music.youtube.com/watch?v={video_id}"
+                if video_id
+                else "https://music.youtube.com"
+            )
             text = (
                 s["beta_now"].format(
                     beta=EMOJI["beta"],
@@ -299,7 +320,10 @@ def register(kernel):
             await event.edit(text, parse_mode="html", link_preview=False)
         except Exception as e:
             await kernel.handle_error(e, source="ytm_beta:ytnow_handler", event=event)
-            await event.edit(f"{EMOJI['error']} <b>{escape_html(str(e)[:300])}</b>", parse_mode="html")
+            await event.edit(
+                f"{EMOJI['error']} <b>{escape_html(str(e)[:300])}</b>",
+                parse_mode="html",
+            )
 
     @kernel.register.command("ytnowdl", alias=["ytmdl"])
     # download the latest track from beta now playing
@@ -307,28 +331,44 @@ def register(kernel):
         try:
             item, error = await get_now_playing()
             if error:
-                await event.edit(f"{EMOJI['error']} <b>{escape_html(error)}</b>", parse_mode="html")
+                await event.edit(
+                    f"{EMOJI['error']} <b>{escape_html(error)}</b>", parse_mode="html"
+                )
                 return
 
             video_id = item.get("videoId") or item.get("videoId".lower())
-            query = f"https://music.youtube.com/watch?v={video_id}" if video_id else item.get("title") or ""
+            query = (
+                f"https://music.youtube.com/watch?v={video_id}"
+                if video_id
+                else item.get("title") or ""
+            )
             if not query:
-                await event.edit(f"{EMOJI['error']} <b>{escape_html(s['download_failed'])}</b>", parse_mode="html")
+                await event.edit(
+                    f"{EMOJI['error']} <b>{escape_html(s['download_failed'])}</b>",
+                    parse_mode="html",
+                )
                 return
 
-            await event.edit(f"{EMOJI['beta']} <b>{s['beta_dl']}</b>", parse_mode="html")
+            await event.edit(
+                f"{EMOJI['beta']} <b>{s['beta_dl']}</b>", parse_mode="html"
+            )
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 file_path, info, dl_error = await resolve_and_download(query, temp_dir)
                 if dl_error:
-                    await event.edit(f"{EMOJI['error']} <b>{escape_html(dl_error)}</b>", parse_mode="html")
+                    await event.edit(
+                        f"{EMOJI['error']} <b>{escape_html(dl_error)}</b>",
+                        parse_mode="html",
+                    )
                     return
 
                 title = info.get("title") or item.get("title") or "Unknown title"
                 artist = _pick_artist(info) or _pick_artist(item)
                 duration = info.get("duration") or 0
                 thumb_path = None
-                thumb_url = info.get("thumbnail") or item.get("thumbnails", [{}])[0].get("url")
+                thumb_url = info.get("thumbnail") or item.get("thumbnails", [{}])[
+                    0
+                ].get("url")
                 if thumb_url:
                     thumb_path = os.path.join(temp_dir, "cover.jpg")
                     ok = await _download_file(thumb_url, thumb_path)
@@ -358,4 +398,7 @@ def register(kernel):
                 await event.delete()
         except Exception as e:
             await kernel.handle_error(e, source="ytm_beta:ytnowdl_handler", event=event)
-            await event.edit(f"{EMOJI['error']} <b>{escape_html(str(e)[:300])}</b>", parse_mode="html")
+            await event.edit(
+                f"{EMOJI['error']} <b>{escape_html(str(e)[:300])}</b>",
+                parse_mode="html",
+            )

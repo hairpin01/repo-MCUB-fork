@@ -30,7 +30,6 @@ from core.lib.loader.module_config import (
 )
 from core.lib.types import Event, InlineMessage
 
-
 CUSTOM_EMOJI = {
     "question": '<tg-emoji emoji-id="5334768819548200731">❔</tg-emoji>',
     "check": '<tg-emoji emoji-id="5330115548900501467">✅</tg-emoji>',
@@ -91,7 +90,9 @@ def _migrate_config(data: dict[str, Any], _old_version: Any = None) -> dict[str,
     }
 
     status = migrated.get("dnd_status")
-    migrated["dnd_status"] = "" if status in (None, False, "False", "None") else str(status)
+    migrated["dnd_status"] = (
+        "" if status in (None, False, "False", "None") else str(status)
+    )
 
     for key in ("dnd_status_duration", "dnd_gone"):
         try:
@@ -188,9 +189,7 @@ class DNDModule(ModuleBase):
             description="Show hello message",
             validator=Boolean(),
         ),
-        ConfigValue(
-            "dnd_status", "", description="Current status", validator=String()
-        ),
+        ConfigValue("dnd_status", "", description="Current status", validator=String()),
         ConfigValue(
             "dnd_status_duration",
             0,
@@ -200,12 +199,8 @@ class DNDModule(ModuleBase):
         ConfigValue(
             "dnd_gone", 0, description="Gone timestamp", validator=Integer(min=0)
         ),
-        ConfigValue(
-            "dnd_further", "", description="Further info", validator=String()
-        ),
-        ConfigValue(
-            "dnd_old_bio", "", description="Old bio", validator=String()
-        ),
+        ConfigValue("dnd_further", "", description="Further info", validator=String()),
+        ConfigValue("dnd_old_bio", "", description="Old bio", validator=String()),
         ConfigValue(
             "dnd_texts",
             {},
@@ -1016,8 +1011,7 @@ class DNDModule(ModuleBase):
         afk_text = f"{html.escape(texts.get(status_name, ''))}\n"
         if further:
             afk_text += (
-                "\n<b><u>Пoдpoбнee:</u></b>\n"
-                f"<code>{html.escape(further)}</code>"
+                "\n<b><u>Пoдpoбнee:</u></b>\n" f"<code>{html.escape(further)}</code>"
             )
         if self.config.get("dnd_afk_gone_time"):
             afk_text += (
@@ -1040,9 +1034,7 @@ class DNDModule(ModuleBase):
 
     @watcher(incoming=True)
     async def message_watcher(self, event: Event) -> None:
-        if getattr(
-            self, "_me", None
-        ) is None:
+        if getattr(self, "_me", None) is None:
             return
         try:
             chat_id = event.chat_id

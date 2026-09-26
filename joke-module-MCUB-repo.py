@@ -13,58 +13,55 @@ import aiohttp
 from telethon import Button
 import json
 
+
 def register(kernel):
     strings = {
-        'en': {
-            'name': 'JokeAPI',
-            'description': 'Sends translated jokes from JokeAPI',
-            'fetching': '🔄 Fetching joke...',
-            'single_joke': '😂 <b>Joke of the day:</b>\n\n<i>{}</i>',
-            'twopart_joke': '😂 <b>Joke of the day:</b>\n\n<b>❓ Question:</b> <i>{}</i>\n<b>💡 Answer:</b> <i>{}</i>',
-            'api_error': '🚫 API Error: Failed to fetch joke. Try again later.',
-            'no_joke': '🚫 Error: No joke found with specified parameters.',
-            'joke_description': '🎭 <b>JokeAPI Help</b>\n\n📝 <b>Usage:</b>\n• <code>.joke</code> - random joke\n• <code>.joke [category]</code> - joke from category\n\n🎭 <b>Available categories:</b>\n• Programming, Miscellaneous, Pun, Spooky, Christmas',
-            'cfg_categories': 'Default categories, comma separated',
-            'cfg_blacklist': 'Excluded categories, comma separated',
-            'translation_error': '⚠️ Failed to translate joke, showing original',
-            'help_cmd': 'Show this help message',
-            'categories_cmd': 'Show available categories',
-            'error_fetch': '🚫 API Error: No data from API for category \'{}\'',
-            'error_format': '🚫 Format Error: Failed to process joke. Type: {}'
+        "en": {
+            "name": "JokeAPI",
+            "description": "Sends translated jokes from JokeAPI",
+            "fetching": "🔄 Fetching joke...",
+            "single_joke": "😂 <b>Joke of the day:</b>\n\n<i>{}</i>",
+            "twopart_joke": "😂 <b>Joke of the day:</b>\n\n<b>❓ Question:</b> <i>{}</i>\n<b>💡 Answer:</b> <i>{}</i>",
+            "api_error": "🚫 API Error: Failed to fetch joke. Try again later.",
+            "no_joke": "🚫 Error: No joke found with specified parameters.",
+            "joke_description": "🎭 <b>JokeAPI Help</b>\n\n📝 <b>Usage:</b>\n• <code>.joke</code> - random joke\n• <code>.joke [category]</code> - joke from category\n\n🎭 <b>Available categories:</b>\n• Programming, Miscellaneous, Pun, Spooky, Christmas",
+            "cfg_categories": "Default categories, comma separated",
+            "cfg_blacklist": "Excluded categories, comma separated",
+            "translation_error": "⚠️ Failed to translate joke, showing original",
+            "help_cmd": "Show this help message",
+            "categories_cmd": "Show available categories",
+            "error_fetch": "🚫 API Error: No data from API for category '{}'",
+            "error_format": "🚫 Format Error: Failed to process joke. Type: {}",
         },
-        'ru': {
-            'name': 'JokeAPI',
-            'description': 'Oтпpaвляeт пepeвeдeнныe шyтки c JokeAPI',
-            'fetching': '🔄 Зaгpyжaю шyткy...',
-            'single_joke': '😂 <b>Шyткa дня:</b>\n\n<i>{}</i>',
-            'twopart_joke': '😂 <b>Шyткa дня:</b>\n\n<b>❓ Вoпpoc:</b> <i>{}</i>\n<b>💡 Oтвeт:</b> <i>{}</i>',
-            'api_error': '🚫 Oшибкa API: He yдaлocь пoлyчить шyткy. Пoпpoбyйтe пoзжe.',
-            'no_joke': '🚫 Oшибкa: Шyткa c yкaзaнными пapaмeтpaми нe нaйдeнa.',
-            'joke_description': '🎭 <b>JokeAPI Help</b>\n\n📝 <b>Иcпoльзoвaниe:</b>\n• <code>.joke</code> - cлyчaйнaя шyткa\n• <code>.joke [кaтeгopия]</code> - шyткa из кaтeгopии\n\n🎭 <b>Дocтyпныe кaтeгopии:</b>\n• Programming, Miscellaneous, Pun, Spooky, Christmas',
-            'cfg_categories': 'Кaтeгopии пo yмoлчaнию, paздeлeнныe зaпятoй',
-            'cfg_blacklist': 'Иcключaeмыe кaтeгopии, paздeлeнныe зaпятoй',
-            'translation_error': '⚠️ He yдaлocь пepeвecти шyткy, пoкaзывaю opигинaл',
-            'help_cmd': 'Пoкaзaть этo cooбщeниe пoмoщи',
-            'categories_cmd': 'Пoкaзaть дocтyпныe кaтeгopии',
-            'error_fetch': '🚫 API Error: Heт дaнныx oт API для кaтeгopии \'{}\'',
-            'error_format': '🚫 Format Error: He yдaлocь oбpaбoтaть шyткy. Тип: {}'
-        }
+        "ru": {
+            "name": "JokeAPI",
+            "description": "Oтпpaвляeт пepeвeдeнныe шyтки c JokeAPI",
+            "fetching": "🔄 Зaгpyжaю шyткy...",
+            "single_joke": "😂 <b>Шyткa дня:</b>\n\n<i>{}</i>",
+            "twopart_joke": "😂 <b>Шyткa дня:</b>\n\n<b>❓ Вoпpoc:</b> <i>{}</i>\n<b>💡 Oтвeт:</b> <i>{}</i>",
+            "api_error": "🚫 Oшибкa API: He yдaлocь пoлyчить шyткy. Пoпpoбyйтe пoзжe.",
+            "no_joke": "🚫 Oшибкa: Шyткa c yкaзaнными пapaмeтpaми нe нaйдeнa.",
+            "joke_description": "🎭 <b>JokeAPI Help</b>\n\n📝 <b>Иcпoльзoвaниe:</b>\n• <code>.joke</code> - cлyчaйнaя шyткa\n• <code>.joke [кaтeгopия]</code> - шyткa из кaтeгopии\n\n🎭 <b>Дocтyпныe кaтeгopии:</b>\n• Programming, Miscellaneous, Pun, Spooky, Christmas",
+            "cfg_categories": "Кaтeгopии пo yмoлчaнию, paздeлeнныe зaпятoй",
+            "cfg_blacklist": "Иcключaeмыe кaтeгopии, paздeлeнныe зaпятoй",
+            "translation_error": "⚠️ He yдaлocь пepeвecти шyткy, пoкaзывaю opигинaл",
+            "help_cmd": "Пoкaзaть этo cooбщeниe пoмoщи",
+            "categories_cmd": "Пoкaзaть дocтyпныe кaтeгopии",
+            "error_fetch": "🚫 API Error: Heт дaнныx oт API для кaтeгopии '{}'",
+            "error_format": "🚫 Format Error: He yдaлocь oбpaбoтaть шyткy. Тип: {}",
+        },
     }
 
-
-    language = kernel.config.get('language', 'en')
-    s = strings.get(language, strings['en'])
-
+    language = kernel.config.get("language", "en")
+    s = strings.get(language, strings["en"])
 
     defaults = {
-        'categories': 'Programming,Miscellaneous,Pun,Spooky,Christmas',
-        'blacklist': 'nsfw,religious,political,racist,sexist,explicit',
-        'language': language
+        "categories": "Programming,Miscellaneous,Pun,Spooky,Christmas",
+        "blacklist": "nsfw,religious,political,racist,sexist,explicit",
+        "language": language,
     }
 
-
-    module_config = kernel.config.get('joke_module', defaults)
-
+    module_config = kernel.config.get("joke_module", defaults)
 
     session = None
 
@@ -85,18 +82,15 @@ def register(kernel):
         if not text or not text.strip():
             return None
 
-        if language == 'en':
+        if language == "en":
             return text
 
         if target_lang is None:
-            target_lang = 'ru' if language == 'ru' else 'en'
+            target_lang = "ru" if language == "ru" else "en"
 
         try:
             url = "https://api.mymemory.translated.net/get"
-            params = {
-                "q": text,
-                "langpair": f"en|{target_lang}"
-            }
+            params = {"q": text, "langpair": f"en|{target_lang}"}
 
             async with session.get(url, params=params) as response:
                 if response.status == 200:
@@ -113,7 +107,7 @@ def register(kernel):
                 "sl": "en",
                 "tl": target_lang,
                 "dt": "t",
-                "q": text
+                "q": text,
             }
 
             async with session.get(url2, params=params2) as response:
@@ -140,9 +134,11 @@ def register(kernel):
 
             translated = await _translate_text(joke_text)
             if translated and translated.strip():
-                text = s['single_joke'].format(translated)
+                text = s["single_joke"].format(translated)
             else:
-                text = f"{s['translation_error']}\n\n{s['single_joke'].format(joke_text)}"
+                text = (
+                    f"{s['translation_error']}\n\n{s['single_joke'].format(joke_text)}"
+                )
 
         else:  # twopart joke
             setup_text = joke_data.get("setup", "")
@@ -153,11 +149,13 @@ def register(kernel):
             translated_setup = await _translate_text(setup_text)
             translated_delivery = await _translate_text(delivery_text)
 
-            if translated_setup and translated_delivery and translated_setup.strip() and translated_delivery.strip():
-                text = s['twopart_joke'].format(
-                    translated_setup,
-                    translated_delivery
-                )
+            if (
+                translated_setup
+                and translated_delivery
+                and translated_setup.strip()
+                and translated_delivery.strip()
+            ):
+                text = s["twopart_joke"].format(translated_setup, translated_delivery)
             else:
                 text = f"{s['translation_error']}\n\n{s['twopart_joke'].format(setup_text, delivery_text)}"
 
@@ -166,7 +164,7 @@ def register(kernel):
     async def _fetch_joke(categories):
         params = {
             "lang": "en",
-            "blacklistFlags": module_config.get('blacklist', defaults['blacklist']),
+            "blacklistFlags": module_config.get("blacklist", defaults["blacklist"]),
         }
 
         url = f"https://v2.jokeapi.dev/joke/{categories}"
@@ -193,28 +191,32 @@ def register(kernel):
         arg = args[1] if len(args) > 1 else ""
 
         if arg.lower() in ["help", "пoмoщь", "кaтeгopии", "categories"]:
-            await event.edit(s['joke_description'], parse_mode='HTML')
+            await event.edit(s["joke_description"], parse_mode="HTML")
             return
 
-        await event.edit(s['fetching'])
+        await event.edit(s["fetching"])
 
-        categories = arg if arg else module_config.get('categories', defaults['categories'])
+        categories = (
+            arg if arg else module_config.get("categories", defaults["categories"])
+        )
 
         try:
             joke_data = await _fetch_joke(categories)
 
             if not joke_data:
-                await event.edit(s['error_fetch'].format(categories))
+                await event.edit(s["error_fetch"].format(categories))
                 return
 
             joke_text = await _format_joke(joke_data)
 
             if not joke_text or not joke_text.strip():
-                await event.edit(s['error_format'].format(joke_data.get('type', 'unknown')))
+                await event.edit(
+                    s["error_format"].format(joke_data.get("type", "unknown"))
+                )
                 return
 
             await event.delete()
-            await event.respond(joke_text, parse_mode='HTML')
+            await event.respond(joke_text, parse_mode="HTML")
 
         except Exception as e:
             await kernel.handle_error(e, source="joke_command", event=event)
@@ -222,15 +224,19 @@ def register(kernel):
 
     async def joke_categories_command(event):
         categories_list = [
-            "Programming", "Miscellaneous", "Pun",
-            "Spooky", "Christmas", "Dark"
+            "Programming",
+            "Miscellaneous",
+            "Pun",
+            "Spooky",
+            "Christmas",
+            "Dark",
         ]
 
         response = "🎭 <b>Available Categories:</b>\n\n"
         response += "\n".join([f"• {cat}" for cat in categories_list])
         response += f"\n\n<b>Current:</b> {module_config.get('categories', defaults['categories'])}"
 
-        await event.edit(response, parse_mode='HTML')
+        await event.edit(response, parse_mode="HTML")
 
     async def joke_config_command(event):
         args = event.text.split(maxsplit=2)
@@ -240,13 +246,15 @@ def register(kernel):
             response += f"<b>Categories:</b> {module_config.get('categories', defaults['categories'])}\n"
             response += f"<b>Blacklist:</b> {module_config.get('blacklist', defaults['blacklist'])}\n"
             response += f"<b>Language:</b> {language}\n\n"
-            response += f"<i>Usage: .jokeconfig set categories Programming,Miscellaneous</i>"
-            await event.edit(response, parse_mode='HTML')
+            response += (
+                f"<i>Usage: .jokeconfig set categories Programming,Miscellaneous</i>"
+            )
+            await event.edit(response, parse_mode="HTML")
             return
 
-        if args[1].lower() == 'set' and len(args) > 2:
+        if args[1].lower() == "set" and len(args) > 2:
             # Oбнoвлeниe кoнфигypaции
-            set_args = args[2].split(' ', 1)
+            set_args = args[2].split(" ", 1)
             if len(set_args) < 2:
                 await event.edit("❌ Usage: .jokeconfig set <key> <value>")
                 return
@@ -254,9 +262,9 @@ def register(kernel):
             key = set_args[0].lower()
             value = set_args[1]
 
-            if key in ['categories', 'blacklist']:
+            if key in ["categories", "blacklist"]:
                 module_config[key] = value
-                kernel.config['joke_module'] = module_config
+                kernel.config["joke_module"] = module_config
                 kernel.save_config()
                 await event.edit(f"✅ {key.capitalize()} updated to: {value}")
             else:
@@ -264,15 +272,15 @@ def register(kernel):
         else:
             await event.edit("❌ Usage: .jokeconfig [set <key> <value>]")
 
-    @kernel.register.command('joke', alias=['j', 'шyткa'])
+    @kernel.register.command("joke", alias=["j", "шyткa"])
     async def joke_handler(event):
         await joke_command(event)
 
-    @kernel.register.command('jokecategories', alias=['jc', 'кaтeгopии'])
+    @kernel.register.command("jokecategories", alias=["jc", "кaтeгopии"])
     async def categories_handler(event):
         await joke_categories_command(event)
 
-    @kernel.register.command('jokeconfig', alias=['jcfg'])
+    @kernel.register.command("jokeconfig", alias=["jcfg"])
     async def config_handler(event):
         await joke_config_command(event)
 
@@ -280,16 +288,16 @@ def register(kernel):
         try:
             await init_session()
 
-            joke_data = await _fetch_joke(module_config.get('categories', defaults['categories']))
+            joke_data = await _fetch_joke(
+                module_config.get("categories", defaults["categories"])
+            )
             if joke_data:
                 joke_text = await _format_joke(joke_data)
                 if joke_text:
-                    log_chat = kernel.config.get('log_chat_id')
+                    log_chat = kernel.config.get("log_chat_id")
                     if log_chat:
                         await kernel.client.send_message(
-                            log_chat,
-                            joke_text,
-                            parse_mode='HTML'
+                            log_chat, joke_text, parse_mode="HTML"
                         )
         except Exception as e:
             await kernel.log_error(f"Daily joke error: {e}")
@@ -308,6 +316,3 @@ def register(kernel):
             await kernel.handle_error(e, source="joke_middleware", event=event)
 
     kernel.add_middleware(translation_middleware)
-
-
-

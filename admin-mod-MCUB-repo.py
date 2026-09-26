@@ -194,24 +194,27 @@ class Admin(ModuleBase):
                 reason = " ".join(rest) or "—"
 
         try:
-            await self.client(EditBannedRequest(
-                event.chat_id,
-                user,
-                ChatBannedRights(
-                    until_date=until,
-                    send_messages=True,
-                    send_media=True,
-                    send_stickers=True,
-                    send_gifs=True,
-                    send_games=True,
-                    send_inline=True,
-                    embed_links=True,
-                ),
-            ))
+            await self.client(
+                EditBannedRequest(
+                    event.chat_id,
+                    user,
+                    ChatBannedRights(
+                        until_date=until,
+                        send_messages=True,
+                        send_media=True,
+                        send_stickers=True,
+                        send_gifs=True,
+                        send_games=True,
+                        send_inline=True,
+                        embed_links=True,
+                    ),
+                )
+            )
             if td:
                 await self._edit(
                     event,
-                    self.strings("muted",
+                    self.strings(
+                        "muted",
                         user=self._user_link(user),
                         duration=_fmt_duration(td),
                         reason=reason,
@@ -220,7 +223,8 @@ class Admin(ModuleBase):
             else:
                 await self._edit(
                     event,
-                    self.strings("muted_perm",
+                    self.strings(
+                        "muted_perm",
                         user=self._user_link(user),
                         reason=reason,
                     ),

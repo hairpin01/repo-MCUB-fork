@@ -545,11 +545,11 @@ def register(kernel):
                 toast = (
                     self._s("added")
                     if st == "added"
-                    else self._s("changed")
-                    if st == "changed"
-                    else self._s("deleted")
-                    if st == "removed"
-                    else ""
+                    else (
+                        self._s("changed")
+                        if st == "changed"
+                        else self._s("deleted") if st == "removed" else ""
+                    )
                 )
                 if toast:
                     await self._answer(event, toast, alert=True)
@@ -634,7 +634,7 @@ def register(kernel):
 
     @kernel.register.command("fheta")
     async def fheta_cmd(event):
-        """ (args) - search heroku/hikka modules"""
+        """(args) - search heroku/hikka modules"""
         args = event.text.split(maxsplit=1)
         prefix = kernel.custom_prefix
 
@@ -697,14 +697,12 @@ def register(kernel):
             )
 
     async def fheta_inline(event):
-        """ (query) inline search heroku/hikka modules"""
+        """(query) inline search heroku/hikka modules"""
         raw = event.text.strip()
         query = (
             raw[6:].strip()
             if raw.lower().startswith("fheta ")
-            else ""
-            if raw.lower() == "fheta"
-            else raw
+            else "" if raw.lower() == "fheta" else raw
         )
 
         if not query:

@@ -13,7 +13,6 @@ from telethon.utils import get_display_name
 
 from core.lib.loader.module_base import ModuleBase, callback, command
 
-
 PHRASES = [
     "Your brain is just a joke... Use it!",
     "What a nice move...",
@@ -90,7 +89,9 @@ MARKER_TO_CHAR = {None: ".", Player.x: "x", Player.o: "o"}
 class Board:
     def __init__(self):
         self.dimension = 3
-        self.grid = [[None for _ in range(self.dimension)] for _ in range(self.dimension)]
+        self.grid = [
+            [None for _ in range(self.dimension)] for _ in range(self.dimension)
+        ]
         self.moves = []
 
     def has_winner(self):
@@ -241,10 +242,7 @@ class TicTacToe(ModuleBase):
         if not game:
             return None
 
-        score = [
-            [MARKER_TO_CHAR[cell] for cell in row]
-            for row in game["board"].grid
-        ]
+        score = [[MARKER_TO_CHAR[cell] for cell in row] for row in game["board"].grid]
         win_x = self._winner(score, "x")
         win_o = self._winner(score, "o")
 
@@ -370,7 +368,10 @@ class TicTacToe(ModuleBase):
             "bot": bot,
             "human_player": human_player,
             "ai_player": ai_player,
-            "mapping": {caller: "x" if human_player == Player.x else "o", "bear": "o" if human_player == Player.x else "x"},
+            "mapping": {
+                caller: "x" if human_player == Player.x else "o",
+                "bear": "o" if human_player == Player.x else "x",
+            },
         }
 
         payload = self._render_ai(uid)

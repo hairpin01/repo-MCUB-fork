@@ -79,32 +79,62 @@ class SenderGifts(loader.ModuleBase):
             "name": "🎄 Новогодние подарки",
             "gifts": [
                 {"id": 5922558454332916696, "emoji": "🎄", "name": "Ёлка", "price": 50},
-                {"id": 5956217000635139069, "emoji": "🧸", "name": "Новогодний мишка", "price": 50},
+                {
+                    "id": 5956217000635139069,
+                    "emoji": "🧸",
+                    "name": "Новогодний мишка",
+                    "price": 50,
+                },
             ],
         },
         "valentines": {
             "name": "💘 День святого валентина",
             "gifts": [
-                {"id": 5800655655995968830, "emoji": "🧸", "name": "14 Февраля мишка", "price": 50},
-                {"id": 5801108895304779062, "emoji": "💘", "name": "14 Февраля сердце", "price": 50},
+                {
+                    "id": 5800655655995968830,
+                    "emoji": "🧸",
+                    "name": "14 Февраля мишка",
+                    "price": 50,
+                },
+                {
+                    "id": 5801108895304779062,
+                    "emoji": "💘",
+                    "name": "14 Февраля сердце",
+                    "price": 50,
+                },
             ],
         },
         "march_8th": {
             "name": "🌷 8 Марта",
             "gifts": [
-                {"id": 5866352046986232958, "emoji": "🧸", "name": "8 Марта мишка", "price": 50},
+                {
+                    "id": 5866352046986232958,
+                    "emoji": "🧸",
+                    "name": "8 Марта мишка",
+                    "price": 50,
+                },
             ],
         },
         "saint_patricks_day": {
             "name": "💰 День святого патрика",
             "gifts": [
-                {"id": 5893356958802511476, "emoji": "🧸", "name": "Лепрекон мишка", "price": 50},
+                {
+                    "id": 5893356958802511476,
+                    "emoji": "🧸",
+                    "name": "Лепрекон мишка",
+                    "price": 50,
+                },
             ],
         },
         "april_1th": {
             "name": "🤪 1 Апреля",
             "gifts": [
-                {"id": 5935895822435615975, "emoji": "🧸", "name": "1 Апреля мишка", "price": 50},
+                {
+                    "id": 5935895822435615975,
+                    "emoji": "🧸",
+                    "name": "1 Апреля мишка",
+                    "price": 50,
+                },
             ],
         },
     }
@@ -154,7 +184,11 @@ class SenderGifts(loader.ModuleBase):
         await call.edit(text, buttons=buttons, parse_mode="html")
         await call.answer()
 
-    @loader.command("sendgift", doc_ru="<username> <text*> — отправить подарок пользователю", doc_en="<username> <text*> — send a Telegram gift")
+    @loader.command(
+        "sendgift",
+        doc_ru="<username> <text*> — отправить подарок пользователю",
+        doc_en="<username> <text*> — send a Telegram gift",
+    )
     async def cmd_sendgift(self, message: events.NewMessage.Event) -> None:
         await self.fetch_gifts_from_github()
 
@@ -187,7 +221,9 @@ class SenderGifts(loader.ModuleBase):
                 user = await self.client.get_entity(username)
             except Exception as e:
                 self.log.error(f"User not found: {e}")
-                await self.edit(message, self.strings["user_not_found"], parse_mode="html")
+                await self.edit(
+                    message, self.strings["user_not_found"], parse_mode="html"
+                )
                 return
 
         await self.edit(message, self.strings["checking_balance"], parse_mode="html")
@@ -204,8 +240,19 @@ class SenderGifts(loader.ModuleBase):
             await self.edit(message, self.strings["min_stars_error"], parse_mode="html")
             return
 
-        buttons = [[self.Button.inline(" ", self._show_main_menu, args=(user.id, text, balance, message.id), ttl=900)]]
-        _, form_message = await self.inline(message.chat_id, "🪐", buttons=buttons, ttl=900) # кастыль, да, иди нахуй
+        buttons = [
+            [
+                self.Button.inline(
+                    " ",
+                    self._show_main_menu,
+                    args=(user.id, text, balance, message.id),
+                    ttl=900,
+                )
+            ]
+        ]
+        _, form_message = await self.inline(
+            message.chat_id, "🪐", buttons=buttons, ttl=900
+        )  # кастыль, да, иди нахуй
         if form_message:
             await form_message.click(0)
             try:
@@ -243,7 +290,9 @@ class SenderGifts(loader.ModuleBase):
         ]
         await self._edit_form(
             call,
-            self.strings["gift_menu"].format(user_display, text if text else "-", balance),
+            self.strings["gift_menu"].format(
+                user_display, text if text else "-", balance
+            ),
             buttons,
         )
 
@@ -257,7 +306,9 @@ class SenderGifts(loader.ModuleBase):
         msg_id: int,
     ) -> None:
         user_display = await self._user_display(user_id)
-        available_categories = [price for price in self.regular_gifts.keys() if balance >= price]
+        available_categories = [
+            price for price in self.regular_gifts.keys() if balance >= price
+        ]
 
         buttons: list[list[Any]] = []
         row: list[Any] = []
@@ -276,10 +327,21 @@ class SenderGifts(loader.ModuleBase):
         if row:
             buttons.append(row)
 
-        buttons.append([self.Button.inline("⬅️ Назад", self._show_main_menu, args=(user_id, text, balance, msg_id), ttl=900)])
+        buttons.append(
+            [
+                self.Button.inline(
+                    "⬅️ Назад",
+                    self._show_main_menu,
+                    args=(user_id, text, balance, msg_id),
+                    ttl=900,
+                )
+            ]
+        )
         await self._edit_form(
             call,
-            self.strings["gift_menu"].format(user_display, text if text else "-", balance),
+            self.strings["gift_menu"].format(
+                user_display, text if text else "-", balance
+            ),
             buttons,
         )
 
@@ -308,12 +370,32 @@ class SenderGifts(loader.ModuleBase):
                 )
 
         if not buttons:
-            buttons.append([self.Button.inline("❌ Нет доступных (баланс)", self._show_main_menu, args=(user_id, text, balance, msg_id), ttl=900)])
+            buttons.append(
+                [
+                    self.Button.inline(
+                        "❌ Нет доступных (баланс)",
+                        self._show_main_menu,
+                        args=(user_id, text, balance, msg_id),
+                        ttl=900,
+                    )
+                ]
+            )
 
-        buttons.append([self.Button.inline("⬅️ Назад", self._show_main_menu, args=(user_id, text, balance, msg_id), ttl=900)])
+        buttons.append(
+            [
+                self.Button.inline(
+                    "⬅️ Назад",
+                    self._show_main_menu,
+                    args=(user_id, text, balance, msg_id),
+                    ttl=900,
+                )
+            ]
+        )
         await self._edit_form(
             call,
-            self.strings["gift_menu"].format(user_display, text if text else "-", balance),
+            self.strings["gift_menu"].format(
+                user_display, text if text else "-", balance
+            ),
             buttons,
         )
 
@@ -335,7 +417,16 @@ class SenderGifts(loader.ModuleBase):
                 self.Button.inline(
                     gift["emoji"],
                     self._select_privacy,
-                    args=(user_id, gift["id"], text, gift["emoji"], msg_id, balance, "regular", price),
+                    args=(
+                        user_id,
+                        gift["id"],
+                        text,
+                        gift["emoji"],
+                        msg_id,
+                        balance,
+                        "regular",
+                        price,
+                    ),
                     ttl=900,
                 )
             )
@@ -345,12 +436,23 @@ class SenderGifts(loader.ModuleBase):
 
         if row:
             buttons.append(row)
-        buttons.append([self.Button.inline("⬅️ Назад", self._show_regular_categories, args=(user_id, text, balance, msg_id), ttl=900)])
+        buttons.append(
+            [
+                self.Button.inline(
+                    "⬅️ Назад",
+                    self._show_regular_categories,
+                    args=(user_id, text, balance, msg_id),
+                    ttl=900,
+                )
+            ]
+        )
 
         user_display = await self._user_display(user_id)
         await self._edit_form(
             call,
-            self.strings["category_menu"].format(price, user_display, text if text else "-"),
+            self.strings["category_menu"].format(
+                price, user_display, text if text else "-"
+            ),
             buttons,
         )
 
@@ -373,7 +475,16 @@ class SenderGifts(loader.ModuleBase):
                     self.Button.inline(
                         gift["emoji"],
                         self._select_privacy,
-                        args=(user_id, gift["id"], text, gift["emoji"], msg_id, balance, "unique", cat_id),
+                        args=(
+                            user_id,
+                            gift["id"],
+                            text,
+                            gift["emoji"],
+                            msg_id,
+                            balance,
+                            "unique",
+                            cat_id,
+                        ),
                         ttl=900,
                     )
                 )
@@ -383,12 +494,23 @@ class SenderGifts(loader.ModuleBase):
 
         if row:
             buttons.append(row)
-        buttons.append([self.Button.inline("⬅️ Назад", self._show_unique_categories, args=(user_id, text, balance, msg_id), ttl=900)])
+        buttons.append(
+            [
+                self.Button.inline(
+                    "⬅️ Назад",
+                    self._show_unique_categories,
+                    args=(user_id, text, balance, msg_id),
+                    ttl=900,
+                )
+            ]
+        )
 
         user_display = await self._user_display(user_id)
         await self._edit_form(
             call,
-            self.strings["unique_category_menu"].format(category["name"], user_display, text if text else "-"),
+            self.strings["unique_category_menu"].format(
+                category["name"], user_display, text if text else "-"
+            ),
             buttons,
         )
 
@@ -405,7 +527,11 @@ class SenderGifts(loader.ModuleBase):
         gift_type: str,
         type_arg: int | str,
     ) -> None:
-        back_callback = self._show_category if gift_type == "regular" else self._show_unique_category_gifts
+        back_callback = (
+            self._show_category
+            if gift_type == "regular"
+            else self._show_unique_category_gifts
+        )
         buttons = [
             [
                 self.Button.inline(
@@ -430,7 +556,9 @@ class SenderGifts(loader.ModuleBase):
                 )
             ],
         ]
-        await self._edit_form(call, self.strings["privacy_menu"].format(gift_emoji), buttons)
+        await self._edit_form(
+            call, self.strings["privacy_menu"].format(gift_emoji), buttons
+        )
 
     @loader.callback(ttl=900)
     async def _send_gift(
@@ -445,7 +573,9 @@ class SenderGifts(loader.ModuleBase):
         hide_name: bool,
     ) -> None:
         try:
-            await call.edit(self.strings["sending_gift"], buttons=None, parse_mode="html")
+            await call.edit(
+                self.strings["sending_gift"], buttons=None, parse_mode="html"
+            )
             await call.answer()
 
             parse_mode = sanitize_parse_mode(self.client.parse_mode)
@@ -455,7 +585,11 @@ class SenderGifts(loader.ModuleBase):
                 user,
                 gift_id,
                 hide_name=hide_name,
-                message=TextWithEntities(parsed_text, entities) if parsed_text else TextWithEntities("", []),
+                message=(
+                    TextWithEntities(parsed_text, entities)
+                    if parsed_text
+                    else TextWithEntities("", [])
+                ),
             )
             form = await self.client(GetPaymentFormRequest(invoice))
             await self.client(SendStarsFormRequest(form.form_id, invoice))

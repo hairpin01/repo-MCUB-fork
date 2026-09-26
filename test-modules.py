@@ -1,3 +1,3 @@
 # test
 def register(kernel):
-  pass
+    pass

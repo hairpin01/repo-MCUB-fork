@@ -212,7 +212,6 @@ def register(kernel):
             except (ValueError, TypeError):
                 log_chat_id = raw_log_chat_id
 
-
             sender_id = event.sender_id
 
             if cfg["ignore_blocked"]:

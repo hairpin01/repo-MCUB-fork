@@ -99,7 +99,9 @@ class UploaderModules(ModuleBase):
             return f"file_{getattr(reply, 'id', 'unknown')}"
         return f"file_{getattr(reply, 'id', 'unknown')}.jpg"
 
-    async def _request(self, request_func: Callable[..., requests.Response], *args: Any, **kwargs: Any) -> requests.Response:
+    async def _request(
+        self, request_func: Callable[..., requests.Response], *args: Any, **kwargs: Any
+    ) -> requests.Response:
         return await asyncio.to_thread(request_func, *args, **kwargs)
 
     async def _upload(
@@ -127,7 +129,11 @@ class UploaderModules(ModuleBase):
         if not response.ok:
             raise UploadStatusError(str(response.status_code))
 
-    @command("catbox", doc_ru="зaгpyзить фaйл нa catbox.moe", doc_en="upload file to catbox.moe")
+    @command(
+        "catbox",
+        doc_ru="зaгpyзить фaйл нa catbox.moe",
+        doc_en="upload file to catbox.moe",
+    )
     async def catbox_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
             response = await self._request(
@@ -141,19 +147,27 @@ class UploaderModules(ModuleBase):
 
         await self._upload(event, "catbox_handler", upload)
 
-    @command("envs", doc_ru="зaгpyзить фaйл нa envs.sh", doc_en="upload file to envs.sh")
+    @command(
+        "envs", doc_ru="зaгpyзить фaйл нa envs.sh", doc_en="upload file to envs.sh"
+    )
     async def envs_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
-            response = await self._request(requests.post, "https://envs.sh", files={"file": file})
+            response = await self._request(
+                requests.post, "https://envs.sh", files={"file": file}
+            )
             self._raise_for_status(response)
             return response.text.strip()
 
         await self._upload(event, "envs_handler", upload)
 
-    @command("kappa", doc_ru="зaгpyзить фaйл нa kappa.lol", doc_en="upload file to kappa.lol")
+    @command(
+        "kappa", doc_ru="зaгpyзить фaйл нa kappa.lol", doc_en="upload file to kappa.lol"
+    )
     async def kappa_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
-            response = await self._request(requests.post, "https://kappa.lol/api/upload", files={"file": file})
+            response = await self._request(
+                requests.post, "https://kappa.lol/api/upload", files={"file": file}
+            )
             self._raise_for_status(response)
             data = response.json()
             return f"https://kappa.lol/{data['id']}"
@@ -177,13 +191,19 @@ class UploaderModules(ModuleBase):
     @command("x0", doc_ru="зaгpyзить фaйл нa x0.at", doc_en="upload file to x0.at")
     async def x0_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
-            response = await self._request(requests.post, "https://x0.at", files={"file": file})
+            response = await self._request(
+                requests.post, "https://x0.at", files={"file": file}
+            )
             self._raise_for_status(response)
             return response.text.strip()
 
         await self._upload(event, "x0_handler", upload)
 
-    @command("tmpfiles", doc_ru="зaгpyзить фaйл нa tmpfiles.org", doc_en="upload file to tmpfiles.org")
+    @command(
+        "tmpfiles",
+        doc_ru="зaгpyзить фaйл нa tmpfiles.org",
+        doc_en="upload file to tmpfiles.org",
+    )
     async def tmpfiles_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
             response = await self._request(
@@ -196,7 +216,11 @@ class UploaderModules(ModuleBase):
 
         await self._upload(event, "tmpfiles_handler", upload)
 
-    @command("pomf", doc_ru="зaгpyзить фaйл нa pomf.lain.la", doc_en="upload file to pomf.lain.la")
+    @command(
+        "pomf",
+        doc_ru="зaгpyзить фaйл нa pomf.lain.la",
+        doc_en="upload file to pomf.lain.la",
+    )
     async def pomf_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
             response = await self._request(
@@ -209,10 +233,16 @@ class UploaderModules(ModuleBase):
 
         await self._upload(event, "pomf_handler", upload)
 
-    @command("bash", doc_ru="зaгpyзить фaйл нa bashupload.com", doc_en="upload file to bashupload.com")
+    @command(
+        "bash",
+        doc_ru="зaгpyзить фaйл нa bashupload.com",
+        doc_en="upload file to bashupload.com",
+    )
     async def bash_handler(self, event: events.NewMessage.Event) -> None:
         async def upload(file: io.BytesIO) -> str:
-            response = await self._request(requests.put, "https://bashupload.com", data=file.read())
+            response = await self._request(
+                requests.put, "https://bashupload.com", data=file.read()
+            )
             self._raise_for_status(response)
             urls = [line for line in response.text.split("\n") if "wget" in line]
             if not urls:

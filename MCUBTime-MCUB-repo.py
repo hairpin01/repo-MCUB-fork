@@ -49,11 +49,12 @@ class HerokuTime(loader.ModuleBase):
     async def on_unload(self) -> None:
         utils.unregister_scope(self.name)
 
-    @utils.placeholders("alltime", description="Total userbot uptime since installation")
+    @utils.placeholders(
+        "alltime", description="Total userbot uptime since installation"
+    )
     async def _placeholder_alltime(self, data: dict) -> str:
         raw = await self.db.db_get(self.name, "start_time")
         if not raw:
             return self.strings["not_set"]
         elapsed = int(time.time()) - int(raw)
         return utils.format_time(elapsed, detailed=True)
-

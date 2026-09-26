@@ -180,7 +180,9 @@ class DBModMCUB(ModuleBase):
                 parsed = parser(stripped)
             except Exception:
                 continue
-            if isinstance(parsed, (dict, list, tuple, str, int, float, bool, type(None))):
+            if isinstance(
+                parsed, (dict, list, tuple, str, int, float, bool, type(None))
+            ):
                 return list(parsed) if isinstance(parsed, tuple) else parsed
         return value
 
@@ -212,7 +214,11 @@ class DBModMCUB(ModuleBase):
         for item in key_path[2:]:
             if isinstance(current, dict) and item in current:
                 current = current[item]
-            elif isinstance(current, list) and isinstance(item, int) and 0 <= item < len(current):
+            elif (
+                isinstance(current, list)
+                and isinstance(item, int)
+                and 0 <= item < len(current)
+            ):
                 current = current[item]
             else:
                 raise KeyError(item)
@@ -290,7 +296,9 @@ class DBModMCUB(ModuleBase):
         self._remember_callback_event(call)
         await call.edit(text, buttons=buttons, parse_mode="html")
 
-    async def show_menu(self, event, key_path: list[Any] | None = None, page: int = 0) -> None:
+    async def show_menu(
+        self, event, key_path: list[Any] | None = None, page: int = 0
+    ) -> None:
         key_path = key_path or []
         self.page_state[tuple(key_path)] = page
         try:
@@ -318,7 +326,9 @@ class DBModMCUB(ModuleBase):
             await event.edit(text, buttons=buttons, parse_mode="html")
 
     @callback(ttl=0)
-    async def navigate_db(self, call, key_path: list[Any] | None = None, page: int = 0) -> None:
+    async def navigate_db(
+        self, call, key_path: list[Any] | None = None, page: int = 0
+    ) -> None:
         self._remember_callback_event(call)
         key_path = key_path or []
         self.page_state[tuple(key_path)] = page
@@ -393,49 +403,75 @@ class DBModMCUB(ModuleBase):
         if key_path:
             parent_page = self.page_state.get(tuple(key_path[:-1]), 0)
             nav_buttons.append(
-                self._button(self.s("back_btn"), self.navigate_db, key_path[:-1], parent_page, style="primary")
+                self._button(
+                    self.s("back_btn"),
+                    self.navigate_db,
+                    key_path[:-1],
+                    parent_page,
+                    style="primary",
+                )
             )
 
         if total_pages > 1:
             if page > 0:
-                nav_buttons.append(self._button("◀️", self.navigate_db, key_path, page - 1))
+                nav_buttons.append(
+                    self._button("◀️", self.navigate_db, key_path, page - 1)
+                )
             nav_buttons.append(
-                self._button(self.s("page", current=page + 1, total=total_pages), self.navigate_db, key_path, page)
+                self._button(
+                    self.s("page", current=page + 1, total=total_pages),
+                    self.navigate_db,
+                    key_path,
+                    page,
+                )
             )
             if page < total_pages - 1:
-                nav_buttons.append(self._button("▶️", self.navigate_db, key_path, page + 1))
+                nav_buttons.append(
+                    self._button("▶️", self.navigate_db, key_path, page + 1)
+                )
         if nav_buttons:
             markup.append(nav_buttons)
 
         if key_path:
-            markup.append([
-                self._input_button(
-                    self.s("add_btn"),
-                    self.add_value_input,
-                    placeholder=self.s("input_key_value"),
-                    data={"path": key_path},
-                    style="primary",
-                ),
-                self._button(self.s("del_all_btn"), self.confirm_delete_all, key_path, style="danger"),
-            ])
+            markup.append(
+                [
+                    self._input_button(
+                        self.s("add_btn"),
+                        self.add_value_input,
+                        placeholder=self.s("input_key_value"),
+                        data={"path": key_path},
+                        style="primary",
+                    ),
+                    self._button(
+                        self.s("del_all_btn"),
+                        self.confirm_delete_all,
+                        key_path,
+                        style="danger",
+                    ),
+                ]
+            )
         else:
-            markup.append([
-                self._input_button(
-                    self.s("add_btn"),
-                    self.add_value_input,
-                    placeholder=self.s("input_module_key_value"),
-                    data={"path": key_path},
-                    style="primary",
-                ),
-                self._button(self.s("close_btn"), self.close_form),
-            ])
+            markup.append(
+                [
+                    self._input_button(
+                        self.s("add_btn"),
+                        self.add_value_input,
+                        placeholder=self.s("input_module_key_value"),
+                        data={"path": key_path},
+                        style="primary",
+                    ),
+                    self._button(self.s("close_btn"), self.close_form),
+                ]
+            )
         return markup
 
     def generate_list_markup(self, data: list[Any], key_path: list[Any], page: int = 0):
         items_per_page = 9
         total_pages = max(1, (len(data) + items_per_page - 1) // items_per_page)
         start_idx = page * items_per_page
-        page_items = list(enumerate(data[start_idx : start_idx + items_per_page], start_idx))
+        page_items = list(
+            enumerate(data[start_idx : start_idx + items_per_page], start_idx)
+        )
 
         markup = []
         row = []
@@ -448,7 +484,9 @@ class DBModMCUB(ModuleBase):
             else:
                 value_str = str(value)
                 btn_text = f"{value_str[:10]}..." if len(value_str) > 10 else value_str
-            row.append(self._button(btn_text, self.navigate_db, key_path + [item_index], 0))
+            row.append(
+                self._button(btn_text, self.navigate_db, key_path + [item_index], 0)
+            )
         if row:
             markup.append(row)
 
@@ -456,30 +494,52 @@ class DBModMCUB(ModuleBase):
         if key_path:
             parent_page = self.page_state.get(tuple(key_path[:-1]), 0)
             nav_buttons.append(
-                self._button(self.s("back_btn"), self.navigate_db, key_path[:-1], parent_page, style="primary")
+                self._button(
+                    self.s("back_btn"),
+                    self.navigate_db,
+                    key_path[:-1],
+                    parent_page,
+                    style="primary",
+                )
             )
         if total_pages > 1:
             if page > 0:
-                nav_buttons.append(self._button("◀️", self.navigate_db, key_path, page - 1))
+                nav_buttons.append(
+                    self._button("◀️", self.navigate_db, key_path, page - 1)
+                )
             nav_buttons.append(
-                self._button(self.s("page", current=page + 1, total=total_pages), self.navigate_db, key_path, page)
+                self._button(
+                    self.s("page", current=page + 1, total=total_pages),
+                    self.navigate_db,
+                    key_path,
+                    page,
+                )
             )
             if page < total_pages - 1:
-                nav_buttons.append(self._button("▶️", self.navigate_db, key_path, page + 1))
+                nav_buttons.append(
+                    self._button("▶️", self.navigate_db, key_path, page + 1)
+                )
         if nav_buttons:
             markup.append(nav_buttons)
 
         if key_path:
-            markup.append([
-                self._input_button(
-                    self.s("add_btn"),
-                    self.add_value_input,
-                    placeholder=self.s("input_value"),
-                    data={"path": key_path},
-                    style="primary",
-                ),
-                self._button(self.s("del_all_btn"), self.confirm_delete_all, key_path, style="danger"),
-            ])
+            markup.append(
+                [
+                    self._input_button(
+                        self.s("add_btn"),
+                        self.add_value_input,
+                        placeholder=self.s("input_value"),
+                        data={"path": key_path},
+                        style="primary",
+                    ),
+                    self._button(
+                        self.s("del_all_btn"),
+                        self.confirm_delete_all,
+                        key_path,
+                        style="danger",
+                    ),
+                ]
+            )
         return markup
 
     def generate_list_item_markup(self, key_path: list[Any]):
@@ -494,8 +554,20 @@ class DBModMCUB(ModuleBase):
                     style="primary",
                 )
             ],
-            [self._button(self.s("del_btn"), self.delete_key, key_path, style="danger")],
-            [self._button(self.s("back_btn"), self.navigate_db, key_path[:-1], parent_page, style="primary")],
+            [
+                self._button(
+                    self.s("del_btn"), self.delete_key, key_path, style="danger"
+                )
+            ],
+            [
+                self._button(
+                    self.s("back_btn"),
+                    self.navigate_db,
+                    key_path[:-1],
+                    parent_page,
+                    style="primary",
+                )
+            ],
         ]
 
     def generate_value_markup(self, key_path: list[Any], value: Any = None):
@@ -504,31 +576,53 @@ class DBModMCUB(ModuleBase):
         parent_page = self.page_state.get(tuple(key_path[:-1]), 0)
         markup = []
         if isinstance(value, (dict, list)):
-            markup.append([
-                self._input_button(
-                    self.s("add_btn"),
-                    self.add_value_input,
-                    placeholder=self.s("input_key_value") if isinstance(value, dict) else self.s("input_value"),
-                    data={"path": key_path},
-                    style="primary",
-                )
-            ])
-        markup.extend([
+            markup.append(
+                [
+                    self._input_button(
+                        self.s("add_btn"),
+                        self.add_value_input,
+                        placeholder=(
+                            self.s("input_key_value")
+                            if isinstance(value, dict)
+                            else self.s("input_value")
+                        ),
+                        data={"path": key_path},
+                        style="primary",
+                    )
+                ]
+            )
+        markup.extend(
             [
-                self._input_button(
-                    self.s("edit_btn"),
-                    self.edit_value_input,
-                    placeholder=self.s("input_value"),
-                    data={"path": key_path},
-                    style="primary",
-                )
-            ],
-            [self._button(self.s("del_btn"), self.delete_key, key_path, style="danger")],
-            [self._button(self.s("back_btn"), self.navigate_db, key_path[:-1], parent_page, style="primary")],
-        ])
+                [
+                    self._input_button(
+                        self.s("edit_btn"),
+                        self.edit_value_input,
+                        placeholder=self.s("input_value"),
+                        data={"path": key_path},
+                        style="primary",
+                    )
+                ],
+                [
+                    self._button(
+                        self.s("del_btn"), self.delete_key, key_path, style="danger"
+                    )
+                ],
+                [
+                    self._button(
+                        self.s("back_btn"),
+                        self.navigate_db,
+                        key_path[:-1],
+                        parent_page,
+                        style="primary",
+                    )
+                ],
+            ]
+        )
         return markup
 
-    async def _render_to_event(self, event, key_path: list[Any], page: int | None = None) -> None:
+    async def _render_to_event(
+        self, event, key_path: list[Any], page: int | None = None
+    ) -> None:
         if page is None:
             page = self.page_state.get(tuple(key_path), 0)
         try:
@@ -539,7 +633,8 @@ class DBModMCUB(ModuleBase):
 
         if key_path and isinstance(key_path[-1], int):
             text = self._value_text(
-                self._make_list_item_path_text(key_path[:-1], key_path[-1]), current_data
+                self._make_list_item_path_text(key_path[:-1], key_path[-1]),
+                current_data,
             )
             buttons = self.generate_list_item_markup(key_path)
         elif isinstance(current_data, (dict, list)) and current_data:
@@ -569,7 +664,11 @@ class DBModMCUB(ModuleBase):
         for item in key_path[2:-1]:
             if isinstance(current, dict) and item in current:
                 current = current[item]
-            elif isinstance(current, list) and isinstance(item, int) and 0 <= item < len(current):
+            elif (
+                isinstance(current, list)
+                and isinstance(item, int)
+                and 0 <= item < len(current)
+            ):
                 current = current[item]
             else:
                 raise KeyError(item)
@@ -577,7 +676,11 @@ class DBModMCUB(ModuleBase):
         last = key_path[-1]
         if isinstance(current, dict) and last in current:
             current[last] = value
-        elif isinstance(current, list) and isinstance(last, int) and 0 <= last < len(current):
+        elif (
+            isinstance(current, list)
+            and isinstance(last, int)
+            and 0 <= last < len(current)
+        ):
             current[last] = value
         else:
             raise KeyError(last)
@@ -663,7 +766,8 @@ class DBModMCUB(ModuleBase):
             await self._replace_value_at_path(key_path, self._parse_input_value(text))
         except KeyError as error:
             await self._safe_edit_text(
-                call, self.s("not_found", key=error.args[0] if error.args else key_path[-1])
+                call,
+                self.s("not_found", key=error.args[0] if error.args else key_path[-1]),
             )
             return
         await self._render_to_event(call, key_path)
@@ -680,7 +784,8 @@ class DBModMCUB(ModuleBase):
             return
         except KeyError as error:
             await self._safe_edit_text(
-                call, self.s("not_found", key=error.args[0] if error.args else key_path[-1])
+                call,
+                self.s("not_found", key=error.args[0] if error.args else key_path[-1]),
             )
             return
         await self._render_to_event(call, added_path)
@@ -703,8 +808,22 @@ class DBModMCUB(ModuleBase):
             call,
             self.s("confirm_delete"),
             [
-                [self._button(self.s("yes_btn"), self.delete_all_keys, key_path, style="danger")],
-                [self._button(self.s("no_btn"), self.navigate_db, key_path, self.page_state.get(tuple(key_path), 0))],
+                [
+                    self._button(
+                        self.s("yes_btn"),
+                        self.delete_all_keys,
+                        key_path,
+                        style="danger",
+                    )
+                ],
+                [
+                    self._button(
+                        self.s("no_btn"),
+                        self.navigate_db,
+                        key_path,
+                        self.page_state.get(tuple(key_path), 0),
+                    )
+                ],
             ],
         )
 
@@ -720,7 +839,11 @@ class DBModMCUB(ModuleBase):
         for item in key_path[2:-1]:
             if isinstance(current, dict) and item in current:
                 current = current[item]
-            elif isinstance(current, list) and isinstance(item, int) and 0 <= item < len(current):
+            elif (
+                isinstance(current, list)
+                and isinstance(item, int)
+                and 0 <= item < len(current)
+            ):
                 current = current[item]
             else:
                 raise KeyError(item)
@@ -730,7 +853,11 @@ class DBModMCUB(ModuleBase):
             deleted = current.pop(last)
             count = len(deleted) if isinstance(deleted, (dict, list)) else 1
             display = str(last)
-        elif isinstance(current, list) and isinstance(last, int) and 0 <= last < len(current):
+        elif (
+            isinstance(current, list)
+            and isinstance(last, int)
+            and 0 <= last < len(current)
+        ):
             deleted = current.pop(last)
             count = len(deleted) if isinstance(deleted, (dict, list)) else 1
             display = f"[{last}] = {deleted}"
@@ -749,7 +876,9 @@ class DBModMCUB(ModuleBase):
                 keys = await self._module_keys(module)
                 for key in keys:
                     await self._delete_raw_key(module, key)
-                await self._answer_callback(call, self.s("deleted_all", count=len(keys)))
+                await self._answer_callback(
+                    call, self.s("deleted_all", count=len(keys))
+                )
                 await self.navigate_db(call, [], self.page_state.get((), 0))
             elif len(key_path) == 2:
                 module, key = str(key_path[0]), str(key_path[1])
@@ -757,7 +886,9 @@ class DBModMCUB(ModuleBase):
                 count = len(value) if isinstance(value, (dict, list)) else 1
                 await self._delete_raw_key(module, key)
                 await self._answer_callback(call, self.s("deleted_all", count=count))
-                await self.navigate_db(call, [module], self.page_state.get((module,), 0))
+                await self.navigate_db(
+                    call, [module], self.page_state.get((module,), 0)
+                )
             else:
                 count, _display = await self._delete_nested_value(key_path)
                 await self._answer_callback(call, self.s("deleted_all", count=count))
@@ -767,7 +898,10 @@ class DBModMCUB(ModuleBase):
                     self.page_state.get(tuple(key_path[:-1]), 0),
                 )
         except KeyError as error:
-            await self._answer_callback(call, self.s("not_found", key=error.args[0] if error.args else key_path[-1]))
+            await self._answer_callback(
+                call,
+                self.s("not_found", key=error.args[0] if error.args else key_path[-1]),
+            )
 
     @callback(ttl=0)
     async def delete_key(self, call, key_path: list[Any]) -> None:
@@ -797,7 +931,10 @@ class DBModMCUB(ModuleBase):
             await self._answer_callback(call, self.s("deleted", key=key_display))
             await self.navigate_db(call, parent_path, parent_page)
         except KeyError as error:
-            await self._answer_callback(call, self.s("not_found", key=error.args[0] if error.args else key_path[-1]))
+            await self._answer_callback(
+                call,
+                self.s("not_found", key=error.args[0] if error.args else key_path[-1]),
+            )
 
     async def find_module_key(self, module_name: str) -> str | None:
         module_name_lower = module_name.lower()
@@ -811,7 +948,9 @@ class DBModMCUB(ModuleBase):
         return None
 
     def args_raw(self, event) -> str:
-        text = (getattr(event, "raw_text", None) or getattr(event, "text", "") or "").strip()
+        text = (
+            getattr(event, "raw_text", None) or getattr(event, "text", "") or ""
+        ).strip()
         parts = text.split(maxsplit=1)
         return parts[1].strip() if len(parts) > 1 else ""
 
@@ -821,8 +960,12 @@ class DBModMCUB(ModuleBase):
         if args:
             module_key = await self.find_module_key(args)
             if module_key:
-                await self.show_menu(event, [module_key], self.page_state.get((module_key,), 0))
+                await self.show_menu(
+                    event, [module_key], self.page_state.get((module_key,), 0)
+                )
                 return
-            await event.edit(self.s("module_not_found", module=html.escape(args)), parse_mode="html")
+            await event.edit(
+                self.s("module_not_found", module=html.escape(args)), parse_mode="html"
+            )
             return
         await self.show_menu(event, [], self.page_state.get((), 0))

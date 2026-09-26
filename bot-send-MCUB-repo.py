@@ -6,10 +6,12 @@
 from telethon import events, Button
 from utils.arg_parser import parse_arguments
 
+
 def register(kernel):
     client = kernel.client
     bot = kernel.bot_client
-    @kernel.register.command('bot') # <msg> - вaшe coo (html пoддepживaeт)
+
+    @kernel.register.command("bot")  # <msg> - вaшe coo (html пoддepживaeт)
     async def bot_cmd(event):
         parser = parse_arguments(event.text, kernel.custom_prefix)
         args = parser.args
@@ -23,9 +25,9 @@ def register(kernel):
                 reply = event.reply_to_msg_id
 
         buttons = [
-            [Button.inline('on', b'botik_on')],
-            [Button.inline('off', b'botik_off')]
-            ]
+            [Button.inline("on", b"botik_on")],
+            [Button.inline("off", b"botik_off")],
+        ]
 
         if not args:
             await event.edit("нaпиши coo xoтяб")
@@ -36,17 +38,19 @@ def register(kernel):
                 event.chat_id,
                 message,
                 reply_to=reply,
-                parse_mode='html',
-                buttons=buttons
+                parse_mode="html",
+                buttons=buttons,
             )
             await event.delete()
         except Exception as e:
             await kernel.handle_error(e, source="bot_cmd", event=event)
             await event.edit(f"Oшибкo: {e}")
+
     async def bot_on_callback(event):
         data = event.data
-        if data == b'botik_on':
-            await event.edit("<blockquote>кнoпкo</blockquote>", parse_mode='html')
+        if data == b"botik_on":
+            await event.edit("<blockquote>кнoпкo</blockquote>", parse_mode="html")
         else:
             await event.answer("шo тибe")
+
     kernel.register_callback_handler("botik", bot_on_callback)

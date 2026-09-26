@@ -203,7 +203,9 @@ class Banners:
             font=lfm_font,
             fill=self._accent(),
         )
-        self._draw_progress_bar(draw, padding, text_area_y + 280, width - (padding * 2), 18)
+        self._draw_progress_bar(
+            draw, padding, text_area_y + 280, width - (padding * 2), 18
+        )
 
         return self._to_png(img)
 
@@ -230,7 +232,9 @@ class Banners:
         progress = max(0.0, min(1.0, float(self.progress)))
         bg = "#2E2E2E" if self.theme != "minimal" else "#555555"
         fg = "#FF3D3D" if self.theme != "minimal" else "#E8E8E8"
-        draw.rounded_rectangle((x, y, x + width, y + height), radius=height // 2, fill=bg)
+        draw.rounded_rectangle(
+            (x, y, x + width, y + height), radius=height // 2, fill=bg
+        )
         draw.rounded_rectangle(
             (x, y, x + max(4, int(width * progress)), y + height),
             radius=height // 2,
@@ -363,7 +367,9 @@ class LastFmMod(ModuleBase):
             "banner_theme",
             "default",
             description="Banner theme",
-            validator=Choice(choices=["default", "minimal", "clean"], default="default"),
+            validator=Choice(
+                choices=["default", "minimal", "clean"], default="default"
+            ),
         ),
         ConfigValue(
             "inline_banner",
@@ -472,7 +478,9 @@ class LastFmMod(ModuleBase):
                     return image["#text"]
         return None
 
-    async def _fetch_now_playing(self, username: str, api_key: str) -> dict[str, Any] | None:
+    async def _fetch_now_playing(
+        self, username: str, api_key: str
+    ) -> dict[str, Any] | None:
         cache_key = f"lastfm:np:{username}"
         cached = self.kernel.cache.get(cache_key)
         if cached:
@@ -508,7 +516,9 @@ class LastFmMod(ModuleBase):
             },
         )
 
-    async def _fetch_track_info(self, artist: str, track: str, api_key: str) -> dict[str, Any]:
+    async def _fetch_track_info(
+        self, artist: str, track: str, api_key: str
+    ) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._get_json,
             "https://ws.audioscrobbler.com/2.0/",
@@ -565,13 +575,16 @@ class LastFmMod(ModuleBase):
                 continue
             parsed.append(
                 {
-                    "time_ms": (int(minutes) * 60 + int(seconds)) * 1000 + int(centiseconds) * 10,
+                    "time_ms": (int(minutes) * 60 + int(seconds)) * 1000
+                    + int(centiseconds) * 10,
                     "text": text,
                 }
             )
         return parsed
 
-    def _format_realtime_lyrics(self, lyrics_data: list[dict[str, Any]], current_index: int) -> str:
+    def _format_realtime_lyrics(
+        self, lyrics_data: list[dict[str, Any]], current_index: int
+    ) -> str:
         if not lyrics_data or current_index < 0:
             return "<i>Waiting for sync...</i>"
         out: list[str] = []
@@ -645,11 +658,15 @@ class LastFmMod(ModuleBase):
 
     async def _render_template(self, template: str, data: dict[str, Any]) -> str:
         try:
-            return await utils.resolve_placeholders(self.name, template, data=data, strict=False)
+            return await utils.resolve_placeholders(
+                self.name, template, data=data, strict=False
+            )
         except Exception:
             return template
 
-    async def _msg(self, key: str, cfg_key: str, data: dict[str, Any] | None = None, **kwargs: Any) -> str:
+    async def _msg(
+        self, key: str, cfg_key: str, data: dict[str, Any] | None = None, **kwargs: Any
+    ) -> str:
         custom = str(self.config.get(cfg_key) or "").strip()
         if custom:
             return await self._render_template(custom, (data or {}) | kwargs)
@@ -666,7 +683,9 @@ class LastFmMod(ModuleBase):
             "lastfm_song_album": "Unknown",
             "lastfm_song_url": "",
             "lastfm_cover_url": "",
-            "lastfm_username": self._escape(str(self.config.get("username") or "").strip()),
+            "lastfm_username": self._escape(
+                str(self.config.get("username") or "").strip()
+            ),
         }
 
         username = str(self.config.get("username") or "").strip()
@@ -685,9 +704,10 @@ class LastFmMod(ModuleBase):
             data[cache_key] = result
             return result
 
-        cover_url = self._find_cover_url(track) or str(
-            self.config.get("fallback_cover") or ""
-        ).strip()
+        cover_url = (
+            self._find_cover_url(track)
+            or str(self.config.get("fallback_cover") or "").strip()
+        )
         result = {
             "lastfm_song_name": self._escape(track.get("name") or "Unknown"),
             "lastfm_song_artist": self._escape(
@@ -709,7 +729,9 @@ class LastFmMod(ModuleBase):
             return str(data["lastfm_song_name"])
         return (await self._lastfm_placeholder_data(data))["lastfm_song_name"]
 
-    @utils.placeholders("lastfm_song_artist", description="Current Last.fm track artist")
+    @utils.placeholders(
+        "lastfm_song_artist", description="Current Last.fm track artist"
+    )
     async def _placeholder_lastfm_song_artist(self, data: dict[str, Any]) -> str:
         if data.get("lastfm_song_artist"):
             return str(data["lastfm_song_artist"])
@@ -727,7 +749,9 @@ class LastFmMod(ModuleBase):
             return str(data["lastfm_song_url"])
         return (await self._lastfm_placeholder_data(data))["lastfm_song_url"]
 
-    @utils.placeholders("lastfm_cover_url", description="Current Last.fm track cover URL")
+    @utils.placeholders(
+        "lastfm_cover_url", description="Current Last.fm track cover URL"
+    )
     async def _placeholder_lastfm_cover_url(self, data: dict[str, Any]) -> str:
         if data.get("lastfm_cover_url"):
             return str(data["lastfm_cover_url"])
@@ -748,7 +772,10 @@ class LastFmMod(ModuleBase):
         cover_url: str = "",
         username: str = "",
     ) -> str:
-        template = self.config.get("custom_text") or "{lastfm_song_artist} - {lastfm_song_name}"
+        template = (
+            self.config.get("custom_text")
+            or "{lastfm_song_artist} - {lastfm_song_name}"
+        )
         try:
             return await utils.resolve_placeholders(
                 self.name,
@@ -766,14 +793,21 @@ class LastFmMod(ModuleBase):
         except Exception:
             return f"<b>{self._escape(name)}</b> - <b>{self._escape(artist)}</b>"
 
-    @command("nowplay", alias=["np"], doc_ru="пoкaзaть тeкyщий тpeк Last.fm", doc_en="show current Last.fm track")
+    @command(
+        "nowplay",
+        alias=["np"],
+        doc_ru="пoкaзaть тeкyщий тpeк Last.fm",
+        doc_en="show current Last.fm track",
+    )
     async def nowplay(self, event) -> None:
         username = str(self.config.get("username") or "").strip()
         if not username:
-            await utils.answer(event, await self._msg("nick_error", "msg_nick_error"), as_html=True)
+            await utils.answer(
+                event, await self._msg("nick_error", "msg_nick_error"), as_html=True
+            )
             return
-        status_text = self.config.get('status_text') or self.strings('uploading')
-        status = await event.edit(status_text, parse_mode='html')
+        status_text = self.config.get("status_text") or self.strings("uploading")
+        status = await event.edit(status_text, parse_mode="html")
 
         try:
             track = await self._fetch_now_playing(
@@ -781,7 +815,9 @@ class LastFmMod(ModuleBase):
                 str(self.config.get("api_key") or "").strip(),
             )
             if not track:
-                await utils.answer(status, await self._msg("no_track", "msg_no_track"), as_html=True)
+                await utils.answer(
+                    status, await self._msg("no_track", "msg_no_track"), as_html=True
+                )
                 return
 
             name = track.get("name") or "Unknown"
@@ -789,9 +825,10 @@ class LastFmMod(ModuleBase):
             album = track.get("album", {}).get("#text") or ""
             song_url = track.get("url") or ""
 
-            cover_url = self._find_cover_url(track) or str(
-                self.config.get("fallback_cover") or ""
-            ).strip()
+            cover_url = (
+                self._find_cover_url(track)
+                or str(self.config.get("fallback_cover") or "").strip()
+            )
             caption = await self._caption(
                 artist,
                 name,
@@ -800,7 +837,7 @@ class LastFmMod(ModuleBase):
                 cover_url=cover_url,
                 username=username,
             )
-            await status.edit(caption, parse_mode='html')
+            await status.edit(caption, parse_mode="html")
             if not cover_url:
                 return
 
@@ -811,7 +848,9 @@ class LastFmMod(ModuleBase):
 
             progress = None
             try:
-                info = await self._fetch_track_info(artist, name, str(self.config.get("api_key") or "").strip())
+                info = await self._fetch_track_info(
+                    artist, name, str(self.config.get("api_key") or "").strip()
+                )
                 duration_ms = int((info.get("track", {}) or {}).get("duration") or 0)
                 if duration_ms > 0:
                     progress = min(1.0, max(0.0, 15_000 / duration_ms))
@@ -830,19 +869,24 @@ class LastFmMod(ModuleBase):
 
             inline_banner = self.config.get("inline_banner")
             if isinstance(inline_banner, str):
-                inline_banner = inline_banner.strip().lower() in {"1", "true", "yes", "on"}
+                inline_banner = inline_banner.strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
 
             if inline_banner:
                 banner_url = await asyncio.to_thread(self._upload_banner_x0, file)
                 await status.edit(
                     caption,
                     file=InputMediaWebPage(banner_url, optional=True),
-                    parse_mode='html',
+                    parse_mode="html",
                     invert_media=True,
                 )
                 return
 
-            await status.edit(caption, file=file, parse_mode='html')
+            await status.edit(caption, file=file, parse_mode="html")
         except Exception as e:
             self.log.error(f"Failed to build Last.fm banner: {e}")
             await utils.answer(
@@ -856,20 +900,30 @@ class LastFmMod(ModuleBase):
                 as_html=True,
             )
 
-    @command("lfmprofile", alias=["lfmp"], doc_ru="пpoфиль Last.fm", doc_en="Last.fm profile")
+    @command(
+        "lfmprofile", alias=["lfmp"], doc_ru="пpoфиль Last.fm", doc_en="Last.fm profile"
+    )
     async def lfmprofile(self, event) -> None:
-        username = utils.get_args_raw(event) or str(self.config.get("username") or "").strip()
+        username = (
+            utils.get_args_raw(event) or str(self.config.get("username") or "").strip()
+        )
         if not username:
-            await utils.answer(event, await self._msg("nick_error", "msg_nick_error"), as_html=True)
+            await utils.answer(
+                event, await self._msg("nick_error", "msg_nick_error"), as_html=True
+            )
             return
         try:
-            data = await self._fetch_profile(username, str(self.config.get("api_key") or "").strip())
+            data = await self._fetch_profile(
+                username, str(self.config.get("api_key") or "").strip()
+            )
             user = data.get("user") or {}
             payload = {
                 "lastfm_username": self._escape(user.get("name") or username),
                 "lastfm_playcount": self._escape(user.get("playcount") or "0"),
                 "lastfm_country": self._escape(user.get("country") or "Unknown"),
-                "lastfm_registered": self._escape((user.get("registered") or {}).get("#text") or "Unknown"),
+                "lastfm_registered": self._escape(
+                    (user.get("registered") or {}).get("#text") or "Unknown"
+                ),
                 "lastfm_profile_url": self._escape(user.get("url") or ""),
             }
             template = str(self.config.get("profile_text") or "")
@@ -878,7 +932,12 @@ class LastFmMod(ModuleBase):
         except Exception as e:
             await utils.answer(
                 event,
-                await self._msg("api_error", "msg_api_error", {"error": self._escape(e)}, error=self._escape(e)),
+                await self._msg(
+                    "api_error",
+                    "msg_api_error",
+                    {"error": self._escape(e)},
+                    error=self._escape(e),
+                ),
                 as_html=True,
             )
 
@@ -886,12 +945,18 @@ class LastFmMod(ModuleBase):
     async def lyrics(self, event) -> None:
         username = str(self.config.get("username") or "").strip()
         if not username:
-            await utils.answer(event, await self._msg("nick_error", "msg_nick_error"), as_html=True)
+            await utils.answer(
+                event, await self._msg("nick_error", "msg_nick_error"), as_html=True
+            )
             return
         try:
-            track = await self._fetch_now_playing(username, str(self.config.get("api_key") or "").strip())
+            track = await self._fetch_now_playing(
+                username, str(self.config.get("api_key") or "").strip()
+            )
             if not track:
-                await utils.answer(event, await self._msg("no_track", "msg_no_track"), as_html=True)
+                await utils.answer(
+                    event, await self._msg("no_track", "msg_no_track"), as_html=True
+                )
                 return
             name = track.get("name") or "Unknown"
             artist = track.get("artist", {}).get("#text") or "Unknown"
@@ -905,12 +970,19 @@ class LastFmMod(ModuleBase):
                 "lastfm_song_name": self._escape(name),
                 "lyrics": self._escape(text),
             }
-            out = await self._render_template(str(self.config.get("lyrics_text") or ""), payload)
+            out = await self._render_template(
+                str(self.config.get("lyrics_text") or ""), payload
+            )
             await utils.answer(event, out, as_html=True)
         except Exception as e:
             await utils.answer(
                 event,
-                await self._msg("api_error", "msg_api_error", {"error": self._escape(e)}, error=self._escape(e)),
+                await self._msg(
+                    "api_error",
+                    "msg_api_error",
+                    {"error": self._escape(e)},
+                    error=self._escape(e),
+                ),
                 as_html=True,
             )
 
@@ -944,7 +1016,9 @@ class LastFmMod(ModuleBase):
                         continue
 
                     current_key = self._track_key(track)
-                    if current_key and current_key != self._rlyrics_data.get("track_key"):
+                    if current_key and current_key != self._rlyrics_data.get(
+                        "track_key"
+                    ):
                         break
 
                 pause_count = 0
@@ -957,7 +1031,9 @@ class LastFmMod(ModuleBase):
                     self._rlyrics_data["last_index"] = idx
                     payload = dict(self._rlyrics_data.get("payload") or {})
                     payload["lyrics"] = self._format_realtime_lyrics(lyrics_data, idx)
-                    txt = await self._render_template(str(self.config.get("rlyrics_text") or ""), payload)
+                    txt = await self._render_template(
+                        str(self.config.get("rlyrics_text") or ""), payload
+                    )
                     await self._edit_live_message(self._rlyrics_data, txt)
             except Exception as e:
                 self.log.error(f"rlyrics loop error: {e}")
@@ -1029,12 +1105,18 @@ class LastFmMod(ModuleBase):
     async def rlyrics(self, event) -> None:
         username = str(self.config.get("username") or "").strip()
         if not username:
-            await utils.answer(event, await self._msg("nick_error", "msg_nick_error"), as_html=True)
+            await utils.answer(
+                event, await self._msg("nick_error", "msg_nick_error"), as_html=True
+            )
             return
         try:
-            track = await self._fetch_now_playing(username, str(self.config.get("api_key") or "").strip())
+            track = await self._fetch_now_playing(
+                username, str(self.config.get("api_key") or "").strip()
+            )
             if not track:
-                await utils.answer(event, await self._msg("no_track", "msg_no_track"), as_html=True)
+                await utils.answer(
+                    event, await self._msg("no_track", "msg_no_track"), as_html=True
+                )
                 return
             name = track.get("name") or "Unknown"
             artist = track.get("artist", {}).get("#text") or "Unknown"
@@ -1103,12 +1185,23 @@ class LastFmMod(ModuleBase):
         except Exception as e:
             await utils.answer(
                 event,
-                await self._msg("api_error", "msg_api_error", {"error": self._escape(e)}, error=self._escape(e)),
+                await self._msg(
+                    "api_error",
+                    "msg_api_error",
+                    {"error": self._escape(e)},
+                    error=self._escape(e),
+                ),
                 as_html=True,
             )
 
-    @command("stoplyrics", doc_ru="ocтaнoвить real-time lyrics", doc_en="stop real-time lyrics")
+    @command(
+        "stoplyrics",
+        doc_ru="ocтaнoвить real-time lyrics",
+        doc_en="stop real-time lyrics",
+    )
     async def stoplyrics(self, event) -> None:
         self._rlyrics_data["active"] = False
         await utils.answer(event, "<b>⏹ Live lyrics stopped</b>", as_html=True)
+
+
 # мкyб paткo

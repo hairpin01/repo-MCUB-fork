@@ -57,6 +57,7 @@ aliases_pack = {
     "fflogo": "t fastfetch --logo ",
 }
 
+
 class AliasesTerminalPack(loader.ModuleBase):
     name = "PackAliasesTerminal"
     description = "Алиасы для терминала: git, docker, fastfetch"
@@ -67,10 +68,10 @@ class AliasesTerminalPack(loader.ModuleBase):
         except CallInsecure as e:
             await self.kernel.handle_error(
                 e,
-                message=f"Please update kernel to v1.4.7.1, or added module '{self.name}' in ExtraProxy (XKernel)"
+                message=f"Please update kernel to v1.4.7.1, or added module '{self.name}' in ExtraProxy (XKernel)",
             )
             return
-            
+
         for alias, command in aliases_pack.items():
             self.kernel.aliases[alias] = command
         self.kernel.config["aliases"] = self.kernel.aliases

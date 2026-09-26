@@ -7,10 +7,7 @@
 import aiohttp
 import asyncio
 import hashlib
-from core.lib.loader.module_config import (
-    ModuleConfig, ConfigValue,
-    Secret
-)
+from core.lib.loader.module_config import ModuleConfig, ConfigValue, Secret
 
 
 def register(kernel):
@@ -30,9 +27,12 @@ def register(kernel):
         return live if live else config
 
     async def _load_config():
-        config_dict = await kernel.get_module_config(__name__, {
-            "virustotal_api_key": "",
-        })
+        config_dict = await kernel.get_module_config(
+            __name__,
+            {
+                "virustotal_api_key": "",
+            },
+        )
         config.from_dict(config_dict)
         await kernel.save_module_config(__name__, config.to_dict())
         kernel.store_module_config_schema(__name__, config)
@@ -74,7 +74,6 @@ def register(kernel):
                     async with session.post(url, headers=headers, data=data) as resp:
                         return await resp.json() if resp.status == 200 else None
 
-
     @kernel.register.command("vtscan")
     async def vtscan_command(event):
         """пpocкaниpoвaть фaйл чepeз VirusTotal"""
@@ -114,7 +113,9 @@ def register(kernel):
             report = await vt_api_request("GET", f"files/{file_hash}", api_key)
 
             if not report:
-                await message.edit("📤 <b>Зaгpyжaю нa VirusTotal...</b>", parse_mode="html")
+                await message.edit(
+                    "📤 <b>Зaгpyжaю нa VirusTotal...</b>", parse_mode="html"
+                )
                 form = aiohttp.FormData()
                 form.add_field("file", file_data, filename=file_name)
                 upload = await vt_api_request("POST", "files", api_key, data=form)
@@ -138,7 +139,9 @@ def register(kernel):
                         analysis
                         and analysis["data"]["attributes"]["status"] == "completed"
                     ):
-                        report = await vt_api_request("GET", f"files/{file_hash}", api_key)
+                        report = await vt_api_request(
+                            "GET", f"files/{file_hash}", api_key
+                        )
                         break
 
                     if i % 5 == 0:
@@ -184,9 +187,7 @@ def register(kernel):
             await kernel.inline_form(
                 event.chat_id,
                 result_text,
-                buttons=[
-                    {"text": "🔎 Пoлный oтчeт", "type": "url", "data": vt_link}
-                ],
+                buttons=[{"text": "🔎 Пoлный oтчeт", "type": "url", "data": vt_link}],
             )
 
         except Exception as e:

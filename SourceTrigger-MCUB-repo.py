@@ -11,6 +11,7 @@ import os
 import re
 from datetime import datetime, timezone
 
+
 def _escape_html(text: str) -> str:
     return (
         text.replace("&", "&amp;")
@@ -38,10 +39,7 @@ from core.lib.loader.module_base import (
     callback,
 )
 
-from core.lib.types import (
-  Event, Message, InlineMessage
-)
-
+from core.lib.types import Event, Message, InlineMessage
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +52,7 @@ class SourceTriggerMod(ModuleBase):
         "ru": "Отправляет медиа/текст из исходного канала в ответ на текстовые триггеры.",
         "en": "Sends media/text from source channel in response to text triggers.",
     }
-    banner_url = 'https://x0.at/NcPW.png'
+    banner_url = "https://x0.at/NcPW.png"
 
     strings: dict[str, dict[str, str]] = {
         "ru": {
@@ -191,22 +189,27 @@ class SourceTriggerMod(ModuleBase):
         ),
         Row(),
         Buttons(
-          "Debug/Docs",
-          "Документация, и другие штуки",
-          "Debug/Docs",
-          lambda m: [ 
-            # m -> self
-            [
-              m.Button.url("Docs", "http://stm.yufic.ru"),
-              m.Button.url("Example channel", "https://t.me/HyperLinkRn")
+            "Debug/Docs",
+            "Документация, и другие штуки",
+            "Debug/Docs",
+            lambda m: [
+                # m -> self
+                [
+                    m.Button.url("Docs", "http://stm.yufic.ru"),
+                    m.Button.url("Example channel", "https://t.me/HyperLinkRn"),
+                ],
+                [
+                    m.Button.url(
+                        "Original mod on heroku UB",
+                        "https://raw.githubusercontent.com/YouRooni/HerokuModules/refs/heads/main/sourcetrigger.py",
+                    )
+                ],
+                [
+                    m.Button.inline(
+                        f"Clear DB (root/{m.name}/*)", m.cb_clear_db, style="danger"
+                    )
+                ],
             ],
-            [
-              m.Button.url("Original mod on heroku UB", "https://raw.githubusercontent.com/YouRooni/HerokuModules/refs/heads/main/sourcetrigger.py")
-            ],
-            [
-              m.Button.inline(f"Clear DB (root/{m.name}/*)", m.cb_clear_db, style="danger")
-            ]
-          ],
         ),
     )
 
@@ -220,15 +223,14 @@ class SourceTriggerMod(ModuleBase):
 
     @callback()
     async def cb_clear_db(self, call: InlineMessage, data=None) -> None:
-      try:
-        keys = await self.db.db_get_module_keys(self.name)
-        for key in keys:
-          await self.db.db_delete(self.name, key)
-        await call.answer("Success")
-      except Exception as e:
-        await call.answer(f"{self.strings("error")("unknown")} {e}")
-        self.log.error(f"Error in cb_clear_db callback: {e}")
-    
+        try:
+            keys = await self.db.db_get_module_keys(self.name)
+            for key in keys:
+                await self.db.db_delete(self.name, key)
+            await call.answer("Success")
+        except Exception as e:
+            await call.answer(f"{self.strings("error")("unknown")} {e}")
+            self.log.error(f"Error in cb_clear_db callback: {e}")
 
     def _prune_outgoing_text_cache(self, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -286,14 +288,19 @@ class SourceTriggerMod(ModuleBase):
         if not installed:
             await self.db.db_set(self.name, "installed_notified", True)
             try:
-                await self.client.send_message("me", (
-                    '<blockquote><tg-emoji emoji-id=5424678651310404309>\U0001f319</tg-emoji>'
-                    ' \u0412\u044b \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u043b\u0438 \u043c\u043e\u0434\u0443\u043b\u044c "SourceTrigger"!</blockquote>\n'
-                    '<blockquote><tg-emoji emoji-id=5424865813100260137>\U0001f310</tg-emoji>'
-                    ' \u0420\u0443\u043a\u043e\u0432\u043e\u0434\u0441\u0442\u0432\u043e - <a href="https://stm.yufic.ru">stm.yufic.ru</a></blockquote>\n'
-                    '<blockquote><tg-emoji emoji-id=5424767119046766924>\u27a1\ufe0f</tg-emoji>'
-                    ' \u041f\u0440\u0438\u044f\u0442\u043d\u043e\u0433\u043e \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u044f!</blockquote>'
-                ), parse_mode="html", disable_web_page_preview=True)
+                await self.client.send_message(
+                    "me",
+                    (
+                        "<blockquote><tg-emoji emoji-id=5424678651310404309>\U0001f319</tg-emoji>"
+                        ' \u0412\u044b \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u043b\u0438 \u043c\u043e\u0434\u0443\u043b\u044c "SourceTrigger"!</blockquote>\n'
+                        "<blockquote><tg-emoji emoji-id=5424865813100260137>\U0001f310</tg-emoji>"
+                        ' \u0420\u0443\u043a\u043e\u0432\u043e\u0434\u0441\u0442\u0432\u043e - <a href="https://stm.yufic.ru">stm.yufic.ru</a></blockquote>\n'
+                        "<blockquote><tg-emoji emoji-id=5424767119046766924>\u27a1\ufe0f</tg-emoji>"
+                        " \u041f\u0440\u0438\u044f\u0442\u043d\u043e\u0433\u043e \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u044f!</blockquote>"
+                    ),
+                    parse_mode="html",
+                    disable_web_page_preview=True,
+                )
             except Exception as e:
                 logger.error(f"Failed to send welcome message: {e}")
         should_parse = True
@@ -332,9 +339,16 @@ class SourceTriggerMod(ModuleBase):
                 key, match_obj = matched
                 should_delete = "delete" in key.split("::", 1)[0]
                 entries = self.triggers.get(key, [])
-                proxy = self.kernel.register.message_proxy(msg=message, original_event=event)
+                proxy = self.kernel.register.message_proxy(
+                    msg=message, original_event=event
+                )
                 tasks = [
-                    self._process_and_send(proxy, e["content_id"] if isinstance(e, dict) else e, should_delete, match_obj)
+                    self._process_and_send(
+                        proxy,
+                        e["content_id"] if isinstance(e, dict) else e,
+                        should_delete,
+                        match_obj,
+                    )
                     for e in entries
                 ]
                 await asyncio.gather(*tasks)
@@ -387,7 +401,9 @@ class SourceTriggerMod(ModuleBase):
         except Exception as e:
             logger.error(f"Error saving triggers to file: {e}")
 
-    async def _process_message_for_triggers(self, msg: Message) -> tuple[str, str, int, int] | None:
+    async def _process_message_for_triggers(
+        self, msg: Message
+    ) -> tuple[str, str, int, int] | None:
         if not msg or not getattr(msg, "text", None):
             return None
         trigger_def_msg = msg
@@ -516,7 +532,9 @@ class SourceTriggerMod(ModuleBase):
                 matched.append((key, ttype, trigger))
         return matched
 
-    async def _process_batch(self, tasks, triggers_dict, counts_dict, status_event, total_processed):
+    async def _process_batch(
+        self, tasks, triggers_dict, counts_dict, status_event, total_processed
+    ):
         results = await asyncio.gather(*tasks)
         for result in results:
             if not result:
@@ -531,11 +549,17 @@ class SourceTriggerMod(ModuleBase):
                 for e in triggers_dict[key]
             )
             if not exists:
-                triggers_dict[key].append({"content_id": content_id, "trigger_id": trigger_id})
+                triggers_dict[key].append(
+                    {"content_id": content_id, "trigger_id": trigger_id}
+                )
             counts_dict[ttype] += 1
         if status_event and total_processed % (self.BATCH_SIZE * 5) == 0:
             try:
-                await self.edit(status_event, self.strings("parsing_progress").format(total_processed), as_html=True)
+                await self.edit(
+                    status_event,
+                    self.strings("parsing_progress").format(total_processed),
+                    as_html=True,
+                )
             except Exception:
                 pass
 
@@ -543,48 +567,115 @@ class SourceTriggerMod(ModuleBase):
         if event:
             await self.edit(event, self.strings("parsing_started"), as_html=True)
         self.triggers.clear()
-        counts = {"exact": 0, "contains": 0, "exact_delete": 0, "regex": 0, "regex_delete": 0}
+        counts = {
+            "exact": 0,
+            "contains": 0,
+            "exact_delete": 0,
+            "regex": 0,
+            "regex_delete": 0,
+        }
         source_id = self.config["source_channel_id"]
         if not source_id:
             if event:
-                await self.edit(event, self.strings("channel_error") + "\n<code>Source channel ID not configured.</code>", as_html=True)
+                await self.edit(
+                    event,
+                    self.strings("channel_error")
+                    + "\n<code>Source channel ID not configured.</code>",
+                    as_html=True,
+                )
             return
         try:
             channel_entity = await self.client.get_entity(source_id)
             tasks = []
             processed_count = 0
             async for msg in self.client.iter_messages(channel_entity, limit=None):
-                tasks.append(asyncio.create_task(self._process_message_for_triggers(msg)))
+                tasks.append(
+                    asyncio.create_task(self._process_message_for_triggers(msg))
+                )
                 processed_count += 1
                 if len(tasks) >= self.BATCH_SIZE:
-                    await self._process_batch(tasks, self.triggers, counts, event, processed_count)
+                    await self._process_batch(
+                        tasks, self.triggers, counts, event, processed_count
+                    )
                     tasks.clear()
             if tasks:
-                await self._process_batch(tasks, self.triggers, counts, event, processed_count)
+                await self._process_batch(
+                    tasks, self.triggers, counts, event, processed_count
+                )
             await self._save_triggers()
-            await self.db.db_set(self.name, "last_parse_time", datetime.now(timezone.utc).isoformat())
+            await self.db.db_set(
+                self.name, "last_parse_time", datetime.now(timezone.utc).isoformat()
+            )
             if event:
                 await self.edit(
                     event,
                     self.strings("parsing_complete").format(
-                        counts["exact"], counts["contains"], counts["exact_delete"], counts["regex"], counts["regex_delete"]
+                        counts["exact"],
+                        counts["contains"],
+                        counts["exact_delete"],
+                        counts["regex"],
+                        counts["regex_delete"],
                     ),
                     as_html=True,
                 )
         except Exception as e:
             logger.exception("Failed to parse triggers")
             if event:
-                await self.edit(event, self.strings("channel_error") + f"\n<code>{_escape_html(str(e))}</code>", as_html=True)
+                await self.edit(
+                    event,
+                    self.strings("channel_error")
+                    + f"\n<code>{_escape_html(str(e))}</code>",
+                    as_html=True,
+                )
 
-    def _replace_placeholders_fast(self, text: str, trigger_msg: Message | None = None, match_obj: re.Match | None = None) -> str:
+    def _replace_placeholders_fast(
+        self,
+        text: str,
+        trigger_msg: Message | None = None,
+        match_obj: re.Match | None = None,
+    ) -> str:
         if not text:
             return text
         placeholders = {}
         now = datetime.now()
-        MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
-        MONTHS_FULL = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+        MONTHS_SHORT = [
+            "янв",
+            "фев",
+            "мар",
+            "апр",
+            "май",
+            "июн",
+            "июл",
+            "авг",
+            "сен",
+            "окт",
+            "ноя",
+            "дек",
+        ]
+        MONTHS_FULL = [
+            "январь",
+            "февраль",
+            "март",
+            "апрель",
+            "май",
+            "июнь",
+            "июль",
+            "август",
+            "сентябрь",
+            "октябрь",
+            "ноябрь",
+            "декабрь",
+        ]
         WEEKDAYS_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-        WEEKDAYS_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        WEEKDAYS_FULL = [
+            "понедельник",
+            "вторник",
+            "среда",
+            "четверг",
+            "пятница",
+            "суббота",
+            "воскресенье",
+        ]
         placeholders["hour"] = now.strftime("%H")
         placeholders["minute"] = now.strftime("%M")
         placeholders["second"] = now.strftime("%S")
@@ -592,21 +683,32 @@ class SourceTriggerMod(ModuleBase):
         placeholders["year"] = now.strftime("%Y")
         placeholders["month"] = now.strftime("%m")
         mi = now.month - 1
-        for k, v in [("month_short_lower", MONTHS_SHORT[mi]), ("month_short_title", MONTHS_SHORT[mi].title()),
-                     ("month_short_upper", MONTHS_SHORT[mi].upper()),
-                     ("month_full_lower", MONTHS_FULL[mi]), ("month_full_title", MONTHS_FULL[mi].title()),
-                     ("month_full_upper", MONTHS_FULL[mi].upper())]:
+        for k, v in [
+            ("month_short_lower", MONTHS_SHORT[mi]),
+            ("month_short_title", MONTHS_SHORT[mi].title()),
+            ("month_short_upper", MONTHS_SHORT[mi].upper()),
+            ("month_full_lower", MONTHS_FULL[mi]),
+            ("month_full_title", MONTHS_FULL[mi].title()),
+            ("month_full_upper", MONTHS_FULL[mi].upper()),
+        ]:
             placeholders[k] = v
         wi = now.weekday()
-        for k, v in [("weekday_num", str(wi + 1)), ("weekday_short_lower", WEEKDAYS_SHORT[wi]),
-                     ("weekday_short_title", WEEKDAYS_SHORT[wi].title()), ("weekday_short_upper", WEEKDAYS_SHORT[wi].upper()),
-                     ("weekday_full_lower", WEEKDAYS_FULL[wi]), ("weekday_full_title", WEEKDAYS_FULL[wi].title()),
-                     ("weekday_full_upper", WEEKDAYS_FULL[wi].upper())]:
+        for k, v in [
+            ("weekday_num", str(wi + 1)),
+            ("weekday_short_lower", WEEKDAYS_SHORT[wi]),
+            ("weekday_short_title", WEEKDAYS_SHORT[wi].title()),
+            ("weekday_short_upper", WEEKDAYS_SHORT[wi].upper()),
+            ("weekday_full_lower", WEEKDAYS_FULL[wi]),
+            ("weekday_full_title", WEEKDAYS_FULL[wi].title()),
+            ("weekday_full_upper", WEEKDAYS_FULL[wi].upper()),
+        ]:
             placeholders[k] = v
         if "{total_triggers}" in text:
             placeholders["total_triggers"] = str(len(self.triggers))
         if "{sent_count}" in text:
-            sc = asyncio.run_coroutine_threadsafe(self.db.db_get(self.name, "sent_count"), self.client.loop).result()
+            sc = asyncio.run_coroutine_threadsafe(
+                self.db.db_get(self.name, "sent_count"), self.client.loop
+            ).result()
             placeholders["sent_count"] = str(sc or 0)
         if trigger_msg:
             t = trigger_msg.text or ""
@@ -625,7 +727,11 @@ class SourceTriggerMod(ModuleBase):
                 placeholders[f"msg-{gn}"] = v
                 placeholders[f"message-{gn}"] = v
         is_premium = bool(self.me and getattr(self.me, "premium", False))
-        loading = "<tg-emoji emoji-id=5425141893598046671>\U0001f4e4</tg-emoji>" if is_premium else "Загрузка..."
+        loading = (
+            "<tg-emoji emoji-id=5425141893598046671>\U0001f4e4</tg-emoji>"
+            if is_premium
+            else "Загрузка..."
+        )
 
         def replacer(m: re.Match) -> str:
             name = m.group(1)
@@ -637,23 +743,48 @@ class SourceTriggerMod(ModuleBase):
             if m.group(2) is not None:
                 return default
             return loading
+
         for _ in range(3):
             if "{" not in text:
                 break
-            text = re.sub(r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}", replacer, text)
+            text = re.sub(
+                r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}",
+                replacer,
+                text,
+            )
         return text
 
     def _has_slow_placeholders(self, text: str) -> bool:
         if not text:
             return False
-        matches = re.findall(r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}", text)
+        matches = re.findall(
+            r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}", text
+        )
         fast = {
-            "total_triggers", "sent_count", "hour", "minute", "second", "day", "year", "month",
-            "month_short_lower", "month_short_title", "month_short_upper",
-            "month_full_lower", "month_full_title", "month_full_upper",
-            "weekday_num", "weekday_short_lower", "weekday_short_title", "weekday_short_upper",
-            "weekday_full_lower", "weekday_full_title", "weekday_full_upper",
-            "message", "msg", "message_text",
+            "total_triggers",
+            "sent_count",
+            "hour",
+            "minute",
+            "second",
+            "day",
+            "year",
+            "month",
+            "month_short_lower",
+            "month_short_title",
+            "month_short_upper",
+            "month_full_lower",
+            "month_full_title",
+            "month_full_upper",
+            "weekday_num",
+            "weekday_short_lower",
+            "weekday_short_title",
+            "weekday_short_upper",
+            "weekday_full_lower",
+            "weekday_full_title",
+            "weekday_full_upper",
+            "message",
+            "msg",
+            "message_text",
         }
         for name, default in matches:
             if default and self._has_slow_placeholders(default):
@@ -671,10 +802,44 @@ class SourceTriggerMod(ModuleBase):
             return text
         placeholders = {}
         now = datetime.now()
-        MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
-        MONTHS_FULL = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+        MONTHS_SHORT = [
+            "янв",
+            "фев",
+            "мар",
+            "апр",
+            "май",
+            "июн",
+            "июл",
+            "авг",
+            "сен",
+            "окт",
+            "ноя",
+            "дек",
+        ]
+        MONTHS_FULL = [
+            "январь",
+            "февраль",
+            "март",
+            "апрель",
+            "май",
+            "июнь",
+            "июль",
+            "август",
+            "сентябрь",
+            "октябрь",
+            "ноябрь",
+            "декабрь",
+        ]
         WEEKDAYS_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-        WEEKDAYS_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        WEEKDAYS_FULL = [
+            "понедельник",
+            "вторник",
+            "среда",
+            "четверг",
+            "пятница",
+            "суббота",
+            "воскресенье",
+        ]
         placeholders["hour"] = now.strftime("%H")
         placeholders["minute"] = now.strftime("%M")
         placeholders["second"] = now.strftime("%S")
@@ -682,16 +847,25 @@ class SourceTriggerMod(ModuleBase):
         placeholders["year"] = now.strftime("%Y")
         placeholders["month"] = now.strftime("%m")
         mi = now.month - 1
-        for k, v in [("month_short_lower", MONTHS_SHORT[mi]), ("month_short_title", MONTHS_SHORT[mi].title()),
-                     ("month_short_upper", MONTHS_SHORT[mi].upper()),
-                     ("month_full_lower", MONTHS_FULL[mi]), ("month_full_title", MONTHS_FULL[mi].title()),
-                     ("month_full_upper", MONTHS_FULL[mi].upper())]:
+        for k, v in [
+            ("month_short_lower", MONTHS_SHORT[mi]),
+            ("month_short_title", MONTHS_SHORT[mi].title()),
+            ("month_short_upper", MONTHS_SHORT[mi].upper()),
+            ("month_full_lower", MONTHS_FULL[mi]),
+            ("month_full_title", MONTHS_FULL[mi].title()),
+            ("month_full_upper", MONTHS_FULL[mi].upper()),
+        ]:
             placeholders[k] = v
         wi = now.weekday()
-        for k, v in [("weekday_num", str(wi + 1)), ("weekday_short_lower", WEEKDAYS_SHORT[wi]),
-                     ("weekday_short_title", WEEKDAYS_SHORT[wi].title()), ("weekday_short_upper", WEEKDAYS_SHORT[wi].upper()),
-                     ("weekday_full_lower", WEEKDAYS_FULL[wi]), ("weekday_full_title", WEEKDAYS_FULL[wi].title()),
-                     ("weekday_full_upper", WEEKDAYS_FULL[wi].upper())]:
+        for k, v in [
+            ("weekday_num", str(wi + 1)),
+            ("weekday_short_lower", WEEKDAYS_SHORT[wi]),
+            ("weekday_short_title", WEEKDAYS_SHORT[wi].title()),
+            ("weekday_short_upper", WEEKDAYS_SHORT[wi].upper()),
+            ("weekday_full_lower", WEEKDAYS_FULL[wi]),
+            ("weekday_full_title", WEEKDAYS_FULL[wi].title()),
+            ("weekday_full_upper", WEEKDAYS_FULL[wi].upper()),
+        ]:
             placeholders[k] = v
         if "{total_triggers}" in text:
             placeholders["total_triggers"] = str(len(self.triggers))
@@ -722,9 +896,17 @@ class SourceTriggerMod(ModuleBase):
                 except Exception:
                     self.me = None
             placeholders["owner_username"] = (
-                getattr(self.me, "username", None) or getattr(self.me, "first_name", None) or ""
-            ) if self.me else ""
-        matches = re.findall(r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}", text)
+                (
+                    getattr(self.me, "username", None)
+                    or getattr(self.me, "first_name", None)
+                    or ""
+                )
+                if self.me
+                else ""
+            )
+        matches = re.findall(
+            r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}", text
+        )
         needed = {m[0] for m in matches}
         if "reply_username" in needed and msg:
             reply_user = None
@@ -738,12 +920,20 @@ class SourceTriggerMod(ModuleBase):
             except Exception:
                 pass
             placeholders["reply_username"] = (
-                getattr(reply_user, "username", None) or getattr(reply_user, "first_name", None) or ""
-            ) if reply_user else ""
+                (
+                    getattr(reply_user, "username", None)
+                    or getattr(reply_user, "first_name", None)
+                    or ""
+                )
+                if reply_user
+                else ""
+            )
         if "cur_chat_username" in needed and msg:
             try:
                 chat = await self.client.get_entity(msg.peer_id)
-                placeholders["cur_chat_username"] = getattr(chat, "username", None) or ""
+                placeholders["cur_chat_username"] = (
+                    getattr(chat, "username", None) or ""
+                )
             except Exception:
                 placeholders["cur_chat_username"] = ""
         if "cur_chat_name" in needed and msg:
@@ -769,8 +959,14 @@ class SourceTriggerMod(ModuleBase):
             except Exception:
                 pass
             if reply_user:
-                placeholders["reply_firstname"] = getattr(reply_user, "first_name", None) or getattr(reply_user, "title", "") or ""
-                placeholders["reply_lastname"] = getattr(reply_user, "last_name", "") or ""
+                placeholders["reply_firstname"] = (
+                    getattr(reply_user, "first_name", None)
+                    or getattr(reply_user, "title", "")
+                    or ""
+                )
+                placeholders["reply_lastname"] = (
+                    getattr(reply_user, "last_name", "") or ""
+                )
             else:
                 placeholders["reply_firstname"] = ""
                 placeholders["reply_lastname"] = ""
@@ -780,10 +976,15 @@ class SourceTriggerMod(ModuleBase):
             default = m.group(2) if m.group(2) is not None else ""
             val = placeholders.get(name)
             return default if val is None or val == "" else val
+
         for _ in range(3):
             if "{" not in text:
                 break
-            text = re.sub(r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}", replacer, text)
+            text = re.sub(
+                r"\{([a-zA-Z0-9_-]+)(?::([^{}]*(?:\{[^{}]+\}[^{}]*)*))?\}",
+                replacer,
+                text,
+            )
         return text
 
     async def _can_embed_links(self, chat_id: int) -> bool:
@@ -795,7 +996,9 @@ class SourceTriggerMod(ModuleBase):
             pass
         return True
 
-    async def _process_and_send(self, event, msg_id: int, should_delete: bool, match_obj: re.Match | None = None) -> bool:
+    async def _process_and_send(
+        self, event, msg_id: int, should_delete: bool, match_obj: re.Match | None = None
+    ) -> bool:
         source_id = self.config["source_channel_id"]
         if not source_id:
             return False
@@ -808,41 +1011,62 @@ class SourceTriggerMod(ModuleBase):
                 first_line = caption.split("\n", 1)[0].strip()
                 if re.match(r"^~{1,3}", first_line):
                     caption = "\n".join(caption.split("\n")[1:]).strip()
-            reply_to_id = event.message.reply_to_msg_id if event.message.is_reply else None
-            is_webpage = source_msg.media and source_msg.media.__class__.__name__ == "MessageMediaWebPage"
+            reply_to_id = (
+                event.message.reply_to_msg_id if event.message.is_reply else None
+            )
+            is_webpage = (
+                source_msg.media
+                and source_msg.media.__class__.__name__ == "MessageMediaWebPage"
+            )
             is_media = bool(source_msg.media) and not is_webpage
             if is_media or should_delete:
                 is_edited = event.message.id in self._edited_msg_ids
-                msg_time = (
-                    event.message.edit_date
-                    or (datetime.now(timezone.utc) if is_edited else event.message.date)
+                msg_time = event.message.edit_date or (
+                    datetime.now(timezone.utc) if is_edited else event.message.date
                 )
                 delay = (datetime.now(timezone.utc) - msg_time).total_seconds()
                 if delay > self.config["max_delay"]:
-                    logger.info(f"Skipping trigger response due to delay: {delay}s (limit: {self.config['max_delay']}s)")
+                    logger.info(
+                        f"Skipping trigger response due to delay: {delay}s (limit: {self.config['max_delay']}s)"
+                    )
                     return False
             if is_media:
-                fast_cap = self._replace_placeholders_fast(caption, event.message, match_obj) if caption else None
+                fast_cap = (
+                    self._replace_placeholders_fast(caption, event.message, match_obj)
+                    if caption
+                    else None
+                )
                 sent = await self.client.send_file(
-                    event.chat_id, source_msg, caption=fast_cap or None,
-                    reply_to=reply_to_id, parse_mode="html",
+                    event.chat_id,
+                    source_msg,
+                    caption=fast_cap or None,
+                    reply_to=reply_to_id,
+                    parse_mode="html",
                 )
                 sc = await self.db.db_get(self.name, "sent_count") or 0
                 await self.db.db_set(self.name, "sent_count", sc + 1)
                 if caption and self._has_slow_placeholders(caption) and sent:
                     _fc, _sm = fast_cap, sent
+
                     async def _upd(fc=_fc, sm=_sm):
-                        slow = await self._replace_placeholders(caption, event, match_obj)
+                        slow = await self._replace_placeholders(
+                            caption, event, match_obj
+                        )
                         if slow != fc:
                             try:
-                                await self.client.edit_message(event.chat_id, sm.id, text=slow)
+                                await self.client.edit_message(
+                                    event.chat_id, sm.id, text=slow
+                                )
                             except Exception as e:
                                 if "not modified" not in str(e).lower():
                                     logger.error(f"Error updating media caption: {e}")
+
                     asyncio.create_task(_upd())
                 if should_delete:
                     try:
-                        await self.client.delete_messages(event.chat_id, [event.message.id])
+                        await self.client.delete_messages(
+                            event.chat_id, [event.message.id]
+                        )
                     except Exception:
                         pass
                 return True
@@ -851,32 +1075,62 @@ class SourceTriggerMod(ModuleBase):
                 preview = can_embed and is_webpage
                 text_to_send = caption or ""
                 if should_delete:
-                    fast_text = self._replace_placeholders_fast(text_to_send, event.message, match_obj) if text_to_send else ""
+                    fast_text = (
+                        self._replace_placeholders_fast(
+                            text_to_send, event.message, match_obj
+                        )
+                        if text_to_send
+                        else ""
+                    )
                     sent = await self.client.send_message(
-                        event.chat_id, fast_text, reply_to=reply_to_id,
-                        parse_mode="html", link_preview=preview,
+                        event.chat_id,
+                        fast_text,
+                        reply_to=reply_to_id,
+                        parse_mode="html",
+                        link_preview=preview,
                     )
                     sc = await self.db.db_get(self.name, "sent_count") or 0
                     await self.db.db_set(self.name, "sent_count", sc + 1)
-                    if text_to_send and self._has_slow_placeholders(text_to_send) and sent:
+                    if (
+                        text_to_send
+                        and self._has_slow_placeholders(text_to_send)
+                        and sent
+                    ):
                         _ft, _sm = fast_text, sent
+
                         async def _upd2(ft=_ft, sm=_sm):
-                            slow = await self._replace_placeholders(text_to_send, event, match_obj)
+                            slow = await self._replace_placeholders(
+                                text_to_send, event, match_obj
+                            )
                             if slow != ft:
                                 try:
-                                    await self.client.edit_message(event.chat_id, sm.id, text=slow, link_preview=preview)
+                                    await self.client.edit_message(
+                                        event.chat_id,
+                                        sm.id,
+                                        text=slow,
+                                        link_preview=preview,
+                                    )
                                 except Exception as e:
                                     if "not modified" not in str(e).lower():
                                         logger.error(f"Error updating delete text: {e}")
+
                         asyncio.create_task(_upd2())
                     if event.message.out:
                         try:
-                            await self.client.delete_messages(event.chat_id, [event.message.id])
+                            await self.client.delete_messages(
+                                event.chat_id, [event.message.id]
+                            )
                         except Exception:
                             pass
                     return True
                 else:
-                    fast_text = self._replace_placeholders_fast(text_to_send, event.message, match_obj) if text_to_send else ""
+                    fast_text = (
+                        self._replace_placeholders_fast(
+                            text_to_send, event.message, match_obj
+                        )
+                        if text_to_send
+                        else ""
+                    )
                     if not fast_text:
                         return False
                     await self.edit(event, fast_text, as_html=True)
@@ -884,14 +1138,18 @@ class SourceTriggerMod(ModuleBase):
                     await self.db.db_set(self.name, "sent_count", sc + 1)
                     if text_to_send and self._has_slow_placeholders(text_to_send):
                         _ft, _ev = fast_text, event
+
                         async def _upd3(ft=_ft, ev=_ev):
-                            slow = await self._replace_placeholders(text_to_send, ev, match_obj)
+                            slow = await self._replace_placeholders(
+                                text_to_send, ev, match_obj
+                            )
                             if slow != ft:
                                 try:
                                     await self.edit(ev, slow, as_html=True)
                                 except Exception as e:
                                     if "not modified" not in str(e).lower():
                                         logger.error(f"Error updating edit text: {e}")
+
                         asyncio.create_task(_upd3())
                     return True
         except Exception as e:
@@ -927,7 +1185,12 @@ class SourceTriggerMod(ModuleBase):
             return
         should_delete = "delete" in key.split("::", 1)[0]
         tasks = [
-            self._process_and_send(event, e["content_id"] if isinstance(e, dict) else e, should_delete, match_obj)
+            self._process_and_send(
+                event,
+                e["content_id"] if isinstance(e, dict) else e,
+                should_delete,
+                match_obj,
+            )
             for e in entries
         ]
         results = await asyncio.gather(*tasks)
@@ -950,53 +1213,93 @@ class SourceTriggerMod(ModuleBase):
         if key not in self.triggers:
             self.triggers[key] = []
         exists = any(
-            (isinstance(e, dict) and e["content_id"] == content_id) or (isinstance(e, int) and e == content_id)
+            (isinstance(e, dict) and e["content_id"] == content_id)
+            or (isinstance(e, int) and e == content_id)
             for e in self.triggers[key]
         )
         if not exists:
-            self.triggers[key].append({"content_id": content_id, "trigger_id": trigger_id})
+            self.triggers[key].append(
+                {"content_id": content_id, "trigger_id": trigger_id}
+            )
         await self._save_triggers()
 
-    @command("tparse", doc_ru="Сканировать исходный канал для обновления триггеров", doc_en="Scan the source channel to update triggers")
+    @command(
+        "tparse",
+        doc_ru="Сканировать исходный канал для обновления триггеров",
+        doc_en="Scan the source channel to update triggers",
+    )
     async def cmd_tparse(self, event: Event) -> None:
         await self._run_parser(event)
 
-    @command("tadd", doc_ru="<reply> <trigger> - Добавить новый триггер", doc_en="<reply> <trigger> - Add a new trigger")
+    @command(
+        "tadd",
+        doc_ru="<reply> <trigger> - Добавить новый триггер",
+        doc_en="<reply> <trigger> - Add a new trigger",
+    )
     async def cmd_tadd(self, event: Event) -> None:
         reply = await event.get_reply_message()
         if not reply:
-            await self.edit(event, self.strings("must_be_reply") + f"\n<code>{_escape_html(event.raw_text)}</code>", as_html=True)
+            await self.edit(
+                event,
+                self.strings("must_be_reply")
+                + f"\n<code>{_escape_html(event.raw_text)}</code>",
+                as_html=True,
+            )
             return
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
         if not args:
-            await self.edit(event, self.strings("no_trigger_specified") + f"\n<code>{_escape_html(event.raw_text)}</code>", as_html=True)
+            await self.edit(
+                event,
+                self.strings("no_trigger_specified")
+                + f"\n<code>{_escape_html(event.raw_text)}</code>",
+                as_html=True,
+            )
             return
         ttype, trigger = self._parse_trigger_string(args)
         if not ttype or not trigger:
-            await self.edit(event, self.strings("invalid_trigger_format") + f"\n<code>{_escape_html(event.raw_text)}</code>", as_html=True)
+            await self.edit(
+                event,
+                self.strings("invalid_trigger_format")
+                + f"\n<code>{_escape_html(event.raw_text)}</code>",
+                as_html=True,
+            )
             return
         await self.edit(event, self.strings("processing_add"), as_html=True)
         source_id = self.config["source_channel_id"]
         if not source_id:
-            await self.edit(event, self.strings("channel_error") + "\n<code>Source channel ID not configured.</code>", as_html=True)
+            await self.edit(
+                event,
+                self.strings("channel_error")
+                + "\n<code>Source channel ID not configured.</code>",
+                as_html=True,
+            )
             return
         try:
-            is_webpage = reply.media and reply.media.__class__.__name__ == "MessageMediaWebPage"
+            is_webpage = (
+                reply.media and reply.media.__class__.__name__ == "MessageMediaWebPage"
+            )
             if reply.media and not is_webpage:
-                content_msg = await self.client.send_file(source_id, reply, caption=reply.text or None, parse_mode="html")
+                content_msg = await self.client.send_file(
+                    source_id, reply, caption=reply.text or None, parse_mode="html"
+                )
             elif reply.text:
-                content_msg = await self.client.send_message(source_id, reply.text, parse_mode="html")
+                content_msg = await self.client.send_message(
+                    source_id, reply.text, parse_mode="html"
+                )
             else:
                 await self.edit(event, self.strings("empty_response"), as_html=True)
                 return
-            trigger_msg = await self.client.send_message(source_id, args, reply_to=content_msg.id, parse_mode="html")
+            trigger_msg = await self.client.send_message(
+                source_id, args, reply_to=content_msg.id, parse_mode="html"
+            )
             key = f"{ttype}::{trigger}"
             if key not in self.triggers:
                 self.triggers[key] = []
             entry = {"content_id": content_msg.id, "trigger_id": trigger_msg.id}
             exists = any(
-                (isinstance(e, dict) and e["content_id"] == content_msg.id) or (isinstance(e, int) and e == content_msg.id)
+                (isinstance(e, dict) and e["content_id"] == content_msg.id)
+                or (isinstance(e, int) and e == content_msg.id)
                 for e in self.triggers[key]
             )
             if not exists:
@@ -1004,7 +1307,11 @@ class SourceTriggerMod(ModuleBase):
             await self._save_triggers()
             channel_id_str = str(source_id).replace("-100", "")
             link = f"https://t.me/c/{channel_id_str}/{trigger_msg.id}"
-            await self.edit(event, self.strings("trigger_added").format(_escape_html(args), link), as_html=True)
+            await self.edit(
+                event,
+                self.strings("trigger_added").format(_escape_html(args), link),
+                as_html=True,
+            )
             if event.message.out:
                 try:
                     await self.client.delete_messages(event.chat_id, [event.message.id])
@@ -1012,9 +1319,16 @@ class SourceTriggerMod(ModuleBase):
                     pass
         except Exception as e:
             logger.exception("Failed to add trigger")
-            await self.edit(event, self.strings("add_trigger_error") + f"\n<code>{_escape_html(str(e))}</code>", as_html=True)
+            await self.edit(
+                event,
+                self.strings("add_trigger_error")
+                + f"\n<code>{_escape_html(str(e))}</code>",
+                as_html=True,
+            )
 
-    @command("tsearch", doc_ru="<query> - Найти триггеры", doc_en="<query> - Search triggers")
+    @command(
+        "tsearch", doc_ru="<query> - Найти триггеры", doc_en="<query> - Search triggers"
+    )
     async def cmd_tsearch(self, event: Event) -> None:
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
@@ -1024,7 +1338,11 @@ class SourceTriggerMod(ModuleBase):
         await self.edit(event, self.strings("search_progress"), as_html=True)
         matched = self._find_matching_triggers(args)
         if not matched:
-            await self.edit(event, self.strings("search_no_results").format(_escape_html(args)), as_html=True)
+            await self.edit(
+                event,
+                self.strings("search_no_results").format(_escape_html(args)),
+                as_html=True,
+            )
             return
         source_id = self.config["source_channel_id"]
         if not source_id:
@@ -1065,7 +1383,9 @@ class SourceTriggerMod(ModuleBase):
                 cid = entry["content_id"] if isinstance(entry, dict) else entry
                 tid = entry.get("trigger_id") if isinstance(entry, dict) else None
 
-                content_link = f"<a href='https://t.me/c/{channel_id_str}/{cid}'>Ответ #{cid}</a>"
+                content_link = (
+                    f"<a href='https://t.me/c/{channel_id_str}/{cid}'>Ответ #{cid}</a>"
+                )
                 if tid:
                     trigger_link = f"<a href='https://t.me/c/{channel_id_str}/{tid}'>Триггер #{tid}</a>"
                     links.append(f"{trigger_link} ({content_link})")
@@ -1084,7 +1404,9 @@ class SourceTriggerMod(ModuleBase):
         )
         await self.edit(event, "\n".join(lines), as_html=True)
 
-    @command("tignore", doc_ru="[chat_id] - Исключить чат", doc_en="[chat_id] - Ignore chat")
+    @command(
+        "tignore", doc_ru="[chat_id] - Исключить чат", doc_en="[chat_id] - Ignore chat"
+    )
     async def cmd_tignore(self, event: Event) -> None:
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
@@ -1097,7 +1419,9 @@ class SourceTriggerMod(ModuleBase):
                     entity = await self.client.get_entity(args)
                     chat_id = entity.id
                 except Exception:
-                    await self.edit(event, self.strings("ignore_invalid_chat"), as_html=True)
+                    await self.edit(
+                        event, self.strings("ignore_invalid_chat"), as_html=True
+                    )
                     return
         else:
             chat_id = event.chat_id
@@ -1108,13 +1432,21 @@ class SourceTriggerMod(ModuleBase):
         if chat_id in ignored:
             ignored.remove(chat_id)
             await self.db.db_set(self.name, "ignored_chats", ignored)
-            await self.edit(event, self.strings("ignore_removed").format(chat_id), as_html=True)
+            await self.edit(
+                event, self.strings("ignore_removed").format(chat_id), as_html=True
+            )
         else:
             ignored.append(chat_id)
             await self.db.db_set(self.name, "ignored_chats", ignored)
-            await self.edit(event, self.strings("ignore_added").format(chat_id), as_html=True)
+            await self.edit(
+                event, self.strings("ignore_added").format(chat_id), as_html=True
+            )
 
-    @command("tsetsource", doc_ru="[chat_id] - Установить источник триггеров", doc_en="[chat_id] - Set trigger source")
+    @command(
+        "tsetsource",
+        doc_ru="[chat_id] - Установить источник триггеров",
+        doc_en="[chat_id] - Set trigger source",
+    )
     async def cmd_tsetsource(self, event: Event) -> None:
         parts = event.raw_text.split(maxsplit=1)
         args = parts[1] if len(parts) > 1 else ""
@@ -1127,7 +1459,9 @@ class SourceTriggerMod(ModuleBase):
                     entity = await self.client.get_entity(args)
                     chat_id = entity.id
                 except Exception:
-                    await self.edit(event, self.strings("ignore_invalid_chat"), as_html=True)
+                    await self.edit(
+                        event, self.strings("ignore_invalid_chat"), as_html=True
+                    )
                     return
         else:
             chat_id = event.chat_id
