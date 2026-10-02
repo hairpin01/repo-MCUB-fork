@@ -3,9 +3,9 @@
 # requires: aiohttp
 # scop: inline
 # CubKit build info:
-# CubKit source sha256: 20f712bd0e3a9286159639b6b36294752ae361401b90c6a8ceca385cc3384ac2
+# CubKit source sha256: 658eca0d59c4e3e93881b02d2f8088754b3118c674038f46a073f694febb095d
 # CubKit payload sha256: 38a79319ca7a319ab57be20ddc2818191d4f9f01d6bb92d2501afbe4be39c7e3
-# CubKit signature: abad8accc7cc7ee9e8eb0d77b2129567939b4363f96559cb9faca2b8db97ce9d
+# CubKit signature: cdd578f36f6b6c77745d72e2205ffeec75249100b8b97efe36f3729ba97fdfe9
 # CubKit signature algorithm: sha256(cubkit-sign-v1 + module id + source sha256 + payload sha256)
 # CubKit source map:
 # - generated line 3876 -> OpenAgentMain.py:1
@@ -3878,7 +3878,7 @@ del __cubkit_bootstrap__
 # -- repo data --
 # repo: https://github.com/hairpin01/repo-MCUB-fork/
 # source: https://github.com/hairpin01/OpenAgent-old/
-# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/openagent-banner.png
+# banner_url: https://raw.githubusercontent.com/hairpin01/OpenAgent-old/main/assets/banner/openagent-banner.png
 # -- end --
 # scop: kernel min v1.4.7
 
