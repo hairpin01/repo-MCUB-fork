@@ -3,6 +3,7 @@
 # author: @Hairpin00
 # version: 1.0.2
 # description: menu inline test
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/menu-buttons-mcub-repo-banner.png
 from telethon import events, Button
 
 

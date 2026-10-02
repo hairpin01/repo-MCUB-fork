@@ -4,6 +4,7 @@
 # version: 1.0.0-beta
 # description: YouTube Music audio downloader with beta now playing integration
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/ytm-beta-mcub-repo-banner.png
 import asyncio
 import os
 import tempfile

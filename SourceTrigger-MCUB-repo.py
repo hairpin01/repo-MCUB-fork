@@ -52,7 +52,7 @@ class SourceTriggerMod(ModuleBase):
         "ru": "Отправляет медиа/текст из исходного канала в ответ на текстовые триггеры.",
         "en": "Sends media/text from source channel in response to text triggers.",
     }
-    banner_url = "https://x0.at/NcPW.png"
+    banner_url = "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/sourcetrigger-banner.png"
 
     strings: dict[str, dict[str, str]] = {
         "ru": {

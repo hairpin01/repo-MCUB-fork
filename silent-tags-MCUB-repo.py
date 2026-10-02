@@ -4,6 +4,7 @@
 # meta: version: 2.1.0
 # meta: description: Mutes tags and logs them
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/silent-tags-mcub-repo-banner.png
 import asyncio
 import json
 import time

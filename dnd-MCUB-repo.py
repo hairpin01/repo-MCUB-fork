@@ -110,7 +110,7 @@ class DNDModule(ModuleBase):
     version = "2.0.1"
     author = "@hikariatama && @Hairpin00"
     description = {"ru": "Unit «SIGMA»", "en": "Unit «SIGMA»"}
-    banner_url = "https://github.com/hikariatama/assets/raw/master/unit_sigma.png"
+    banner_url = "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/dnd-mcub-repo-banner.png"
     strings = {"name": "DND"}
 
     config = ModuleConfig(

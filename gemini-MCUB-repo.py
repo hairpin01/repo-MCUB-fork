@@ -27,6 +27,7 @@ __version__ = (5, 8, 0)  # пepeпeшитe нa мeня квapтиpy пж
 # version: 5.8.0
 # description: gemini for MCUB ! | MIT License
 # scop: kernel min v1.0.2.2.5
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/gemini-mcub-repo-banner.png
 # ----------------------- End ------------------------------
 import re
 import os

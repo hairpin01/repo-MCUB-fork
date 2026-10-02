@@ -3,6 +3,7 @@
 # version: 1.1.1
 # description: Aвтoмaтичecкий фapминг cooбщeний c oтcлeживaниeм oтвeтoв
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/farm-mcub-repo-banner.png
 import asyncio
 import time
 import re

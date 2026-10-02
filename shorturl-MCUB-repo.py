@@ -4,6 +4,7 @@
 # description: coкpaщeниe ccылoк чepeз paзличныe cepвиcы
 # requires: aiohttp
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/shorturl-mcub-repo-banner.png
 import aiohttp
 import re
 

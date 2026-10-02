@@ -3,6 +3,7 @@
 # version: 1.0.0
 # description: Run code in 10 languages via local interpreters
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/polyglot-cauldron-mcub-repo-banner.png
 import asyncio
 import os
 import tempfile

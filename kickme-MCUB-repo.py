@@ -4,6 +4,7 @@
 # version: 1.0.3
 # description: Kick users who send /kickme command with proper async structure
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/kickme-mcub-repo-banner.png
 import re
 from telethon import events
 

@@ -3,7 +3,7 @@
 # author: @Hairpin00
 # version: 1.0.2
 # description: load new kernel
-# banner_url: https://x0.at/WelF.mp4
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/core-loader-mcub-repo-banner.png
 
 import ast
 import os

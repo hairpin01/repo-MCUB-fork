@@ -4,7 +4,7 @@ from __future__ import annotations
 # author: @midga3_modules / port by OpenAgent
 # version: 1.0.4
 # description: NOT OFFICIAL FHeta status checker for MCUB
-# banner_url: https://ia801007.us.archive.org/BookReader/BookReaderImages.php?zip=/11/items/jeffrey-epstein-files-full/Jeffrey%20Epstein%20files%20_full_jp2.zip&file=Jeffrey%20Epstein%20files%20_full_jp2/Jeffrey%20Epstein%20files%20_full_0004.jp2&id=jeffrey-epstein-files-full&scale=4&rotate=0
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/fhetastatus-banner.png
 
 import asyncio
 from typing import Any

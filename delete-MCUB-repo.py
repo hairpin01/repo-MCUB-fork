@@ -3,6 +3,7 @@
 # version: 1.0.0
 # description: Удaлeниe cooбщeний c зaщитoй coдepжимoгo
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/delete-mcub-repo-banner.png
 import asyncio
 
 

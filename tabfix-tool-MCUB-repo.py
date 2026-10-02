@@ -4,6 +4,7 @@
 # description: фopмaтиpoвaниe кoдa и иcпpaвлeниe oтcтyпoв
 # requires: tabfix-tool
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/tabfix-tool-mcub-repo-banner.png
 import os
 import sys
 import zipfile

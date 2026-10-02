@@ -51,7 +51,7 @@ class Teledocs(ModuleBase):
         "ru": "Дoкyмeнтaция Telethon TL пoд pyкoй",
         "en": "Telethon TL docs in your pocket",
     }
-    banner_url = "https://mods.hikariatama.ru/badges/teledocs.jpg"
+    banner_url = "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/teledocs-banner.png"
 
     strings = {
         "name": "Teledocs",

@@ -1,3 +1,4 @@
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/dbmod-banner.png
 import ast
 import html
 import json

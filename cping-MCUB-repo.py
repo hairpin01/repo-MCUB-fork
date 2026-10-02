@@ -1,4 +1,5 @@
 # scop: kernel min v1.2.7.2
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/cping-mcub-repo-banner.png
 import aiohttp
 import time
 import asyncio

@@ -29,7 +29,7 @@ class SenderGifts(loader.ModuleBase):
         "ru": "Отправка обычных и уникальных Telegram-подарков в чате",
         "en": "Send regular and unique Telegram gifts in chat",
     }
-    banner_url = "https://files.catbox.moe/nie3ef.jpg"
+    banner_url = "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/sendergifts-banner.png"
 
     _messages = {
         "name": "SenderGifts",

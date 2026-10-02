@@ -3,6 +3,7 @@
 # author: @Hairpin00
 # version: 1.0.0
 # description: TikTok video downloader
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/ttmod-mcub-repo-banner.png
 import asyncio
 import os
 import tempfile

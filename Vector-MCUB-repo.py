@@ -705,7 +705,7 @@ class Vector(
         "uk": "Браузер реєстру модулів Vector.\nhttps://www.0xvector.lol",
     }
     dependencies = ["aiohttp"]
-    banner_url = "https://raw.githubusercontent.com/sepiol026-wq/GoyModules/refs/heads/main/assets/vector.png"
+    banner_url = "https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/vector-banner.png"
 
     config = ModuleConfig(
         ConfigValue(

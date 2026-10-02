@@ -4,6 +4,7 @@
 # version: 1.0.0
 # description: Clicker game module
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/clicker-mcub-repo-banner.png
 import json
 from telethon import Button
 

@@ -1,4 +1,5 @@
 # scop: kernel min v1.2.8
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/fastfetch-banner.png
 from telethon import events
 import subprocess
 import core.lib.loader.module_base as loader

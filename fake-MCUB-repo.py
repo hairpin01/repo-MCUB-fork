@@ -3,6 +3,7 @@
 # version: 1.0.0
 # description: имитaция дeйcтвий пoльзoвaтeля
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/fake-mcub-repo-banner.png
 import asyncio
 from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import (

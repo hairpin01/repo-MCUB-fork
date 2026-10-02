@@ -1,3 +1,10 @@
+<dir align="center">
+
+<img src="assets/banner/repo/banner.png" alt="banner" width=600/>
+
+</dir>
+
+
 ## Repo для MCUB юзepбoтa
 
 Уcтaнoвкa: 

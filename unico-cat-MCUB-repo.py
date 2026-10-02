@@ -7,6 +7,7 @@
 # author: @Hairpin00
 # version: 1.4.0
 # description: Oтпpaвляeт unico c кaнaлa unico_1213213213 / sending unico with channel unico_1213213213
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/unico-cat-mcub-repo-banner.png
 # ----------------------- End ------------------------------
 
 import random

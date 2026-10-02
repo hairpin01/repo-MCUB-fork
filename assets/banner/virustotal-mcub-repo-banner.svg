@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400">
+  <rect width="1200" height="400" fill="#0a0a0a"/>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="400" fill="url(#grid)"/>
+
+  <!-- package icon -->
+  <g transform="translate(930, 130)" stroke="#ffffff" fill="none" stroke-width="3"
+     stroke-linejoin="round" stroke-linecap="round" stroke-opacity="0.9">
+    <path d="M 60 0 L 120 30 L 60 60 L 0 30 Z"/>
+    <path d="M 0 30 L 0 110 L 60 140 L 60 60 Z"/>
+    <path d="M 120 30 L 120 110 L 60 140 L 60 60 Z"/>
+    <path d="M 60 0 L 60 60" stroke-opacity="0.35"/>
+  </g>
+
+  <line x1="80" y1="120" x2="80" y2="280" stroke="#ffffff" stroke-width="4"/>
+
+  <text x="120" y="205"
+        font-family="'JetBrains Mono','SF Mono','Menlo','Consolas',monospace"
+        font-size="60" font-weight="700" fill="#ffffff"
+        letter-spacing="-3">virustotal-MCUB-repo</text>
+
+  <text x="124" y="255"
+        font-family="'JetBrains Mono','SF Mono','Menlo','Consolas',monospace"
+        font-size="18" fill="#ffffff" fill-opacity="0.55"
+        letter-spacing="3">VirusTotal file scanning module for MCUB · module</text>
+
+  <path d="M 30 30 L 30 60 M 30 30 L 60 30" stroke="#ffffff" stroke-width="2" fill="none"/>
+  <path d="M 1170 370 L 1170 340 M 1170 370 L 1140 370" stroke="#ffffff" stroke-width="2" fill="none"/>
+</svg>

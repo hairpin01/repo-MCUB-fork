@@ -3,6 +3,7 @@
 # version: 1.0.4
 # description: yнивepcaльный AFK мoдyль
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/afk_mod-mcub-repo-banner.png
 import time
 import datetime
 import asyncio

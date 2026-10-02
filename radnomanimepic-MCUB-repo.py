@@ -20,6 +20,7 @@
 # author: @ke_mods && port: @Hairpin00
 # version: 1.4.0
 # description: anime pic
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/radnomanimepic-mcub-repo-banner.png
 # ----------------------- End ------------------------------
 
 import asyncio

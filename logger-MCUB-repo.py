@@ -4,6 +4,7 @@
 # version: 2.0.0
 # description: message logger module for tracking deleted and edited messages
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/logger-mcub-repo-banner.png
 import asyncio
 import aiosqlite
 import aiofiles

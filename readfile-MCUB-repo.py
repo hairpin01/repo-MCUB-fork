@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Шмэлькa | @hairpin01
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/readfile-mcub-repo-banner.png
 import base64
 import hashlib
 import html

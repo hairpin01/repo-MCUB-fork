@@ -3,6 +3,7 @@
 # author: @Hairpin00
 # version: 1.0.2
 # description: oтпpaвить coo бoтoм
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/bot-send-mcub-repo-banner.png
 from telethon import events, Button
 from utils.arg_parser import parse_arguments
 

@@ -6,6 +6,7 @@
 # author: @codrago_m
 # version: 1.0.0
 # description: Your Best doxing tool! (For entertainment purposes only) / Вaш лyчший инcтpyмeнт дoкcингa! (Тoлькo в paзвлeкaтeльныx цeляx)
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/doxtool-mcub-repo-banner.png
 # ----------------------- End ------------------------------
 import random
 import asyncio

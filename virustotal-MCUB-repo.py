@@ -4,6 +4,7 @@
 # version: 1.2.0
 # description: VirusTotal file scanning module for MCUB
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/virustotal-mcub-repo-banner.png
 import aiohttp
 import asyncio
 import hashlib

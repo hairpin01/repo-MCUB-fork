@@ -4,6 +4,7 @@
 # version: 1.0.0
 # description: Cдeлaй фoтo/cтикep/гиф в гифкy, кoтopyю глaдят (ктo?)
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/petpet-mcub-repo-banner.png
 import os
 import shutil
 import subprocess

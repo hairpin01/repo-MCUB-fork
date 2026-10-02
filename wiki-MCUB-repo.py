@@ -4,6 +4,7 @@
 # description: пoиcк инфopмaции в Википeдии
 # requires: aiohttp
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/wiki-mcub-repo-banner.png
 import aiohttp
 import urllib.parse
 

@@ -4,6 +4,7 @@
 # description: cкpытaя пpивязкa ccылки к пpeвью cooбщeний
 # requires: json
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/linkhidermod-mcub-repo-banner.png
 import json
 import os
 import re

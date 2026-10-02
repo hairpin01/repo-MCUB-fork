@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <rect width="1280" height="640" fill="#0a0a0a"/>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+
+  <!-- git branch icon -->
+  <g transform="translate(610, 140)" stroke="#ffffff" fill="none" stroke-width="4"
+     stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.9">
+    <circle cx="0" cy="0" r="14"/>
+    <circle cx="0" cy="60" r="14"/>
+    <circle cx="60" cy="30" r="14"/>
+    <path d="M 0 14 L 0 46"/>
+    <path d="M 14 0 Q 60 0 60 16"/>
+  </g>
+
+  <text x="640" y="380" text-anchor="middle"
+        font-family="'JetBrains Mono','SF Mono','Menlo','Consolas',monospace"
+        font-size="160" font-weight="700" fill="#ffffff"
+        letter-spacing="-2">MCUB-fork</text>
+
+  <line x1="440" y1="415" x2="840" y2="415"
+        stroke="#ffffff" stroke-opacity="0.25" stroke-width="2"/>
+
+  <text x="640" y="465" text-anchor="middle"
+        font-family="'JetBrains Mono','SF Mono','Menlo','Consolas',monospace"
+        font-size="24" fill="#ffffff" fill-opacity="0.6"
+        letter-spacing="4">Module repo for MCUB-fork</text>
+
+  <text x="640" y="545" text-anchor="middle"
+        font-family="'JetBrains Mono','SF Mono','Menlo','Consolas',monospace"
+        font-size="14" fill="#ffffff" fill-opacity="0.3"
+        letter-spacing="8">R E P O S I T O R Y</text>
+
+  <path d="M 40 40 L 40 80 M 40 40 L 80 40" stroke="#ffffff" stroke-width="2" fill="none"/>
+  <path d="M 1240 600 L 1240 560 M 1240 600 L 1200 600" stroke="#ffffff" stroke-width="2" fill="none"/>
+</svg>

@@ -1,4 +1,5 @@
 # name: watcher-last-fm-MCUB-repo
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/watcher-last-fm-mcub-repo-banner.png
 import asyncio
 import aiohttp
 import logging

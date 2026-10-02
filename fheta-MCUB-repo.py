@@ -10,7 +10,7 @@
 # version: 2.1.0
 # description: Fheta for MCUB! / Фxeтa в MCUB! @FHeta_Updates
 # scop: kernel min v1.1.6
-# banner_url: https://github.com/Fixyres/FModules/blob/main/assets/FHeta/logo.png?raw=true
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/fheta-mcub-repo-banner.png
 # ----------------------- End ------------------------------
 import asyncio
 import aiohttp

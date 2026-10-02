@@ -38,6 +38,7 @@
 #   - OpenAgentLib/SystemPlugins/Code/choose_filename.py -> choose_filename.py:1 (lines: 27, sha256: 1d0fd72db20c6607a11085c5f139ecf8648cea366718b8571dd332aca563ad1f)
 #   - OpenAgentLib/SystemPlugins/Code/generate_file.py -> generate_file.py:1 (lines: 27, sha256: c06a77d0632df5e2e1963c90563ffebe0c1611648b254ef13283c67255c28318)
 #   - OpenAgentLib/SystemPlugins/Code/generate_mcub_module.py -> generate_mcub_module.py:1 (lines: 27, sha256: 34e26981e8eab742bdf2b4df47859cbfbf62904093ee65d5682c3e754192d5b5)
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/openagent-banner.png
 #   - OpenAgentLib/SystemPlugins/Code/read_docs.py -> read_docs.py:1 (lines: 22, sha256: 12b2395393173e2118b782d577723f9f86834204e800abdad4b83730ece0e52a)
 #   - OpenAgentLib/SystemPlugins/Context/clear.py -> clear.py:1 (lines: 21, sha256: 8181670618be67bd4d8c40ec86aa35b2d3ffcdf783dd1a91b95c214850e728c7)
 #   - OpenAgentLib/SystemPlugins/Context/discard.py -> discard.py:1 (lines: 25, sha256: e1b4e9c4e1c87e0f1ce4b6f90427c783be03653c4f72cc9855256953a20a5b53)

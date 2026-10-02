@@ -8,6 +8,7 @@
 # author: @Deseara && port: @Hairpin00
 # version: 2.0
 # description: Oтпpaвляeт пepeвeдeнныe шyтки c JokeAPI
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/joke-module-mcub-repo-banner.png
 # ----------------------- End ------------------------------
 import aiohttp
 from telethon import Button

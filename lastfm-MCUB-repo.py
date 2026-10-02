@@ -15,6 +15,7 @@
 # meta developer: @ke_mods
 # scop: kernel min v1.3.0
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/lastfm-banner.png
 from __future__ import annotations
 
 import asyncio

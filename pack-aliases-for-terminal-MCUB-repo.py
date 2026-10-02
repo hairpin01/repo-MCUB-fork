@@ -2,6 +2,7 @@
 # scop: kernel min v1.4.7.1
 # or XPatchKernel. enable ExtraProxy for module and scopes: Kernel
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/packaliasesterminal-banner.png
 import core.lib.loader.module_base as loader
 from core.lib.utils.exceptions import CallInsecure
 

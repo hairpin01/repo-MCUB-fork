@@ -4,6 +4,7 @@
 # version: 1.1.0
 # description: Пoлyчить инфopмaцию oб aккayнтe, дц, дaтy peгиcтpaции.
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/k-accoutdata-mcub-repo-banner.png
 import asyncio
 from datetime import datetime
 import numpy as np

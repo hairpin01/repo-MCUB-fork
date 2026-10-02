@@ -1,5 +1,6 @@
 # requires: aiohttp, pillow>=10.0.0, git+https://github.com/MarshalX/yandex-music-api
 # scop: kernel min v1.3.0
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/yamusic-banner.png
 from __future__ import annotations
 
 import asyncio

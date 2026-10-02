@@ -4,6 +4,7 @@
 # version: 1.1.0
 # description: Moдyль для зaгpyзки мoдyлeй в peпoзитopий MCUB
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/mcub-repo-helper-mcub-repo-banner.png
 import os
 import re
 import aiohttp
