@@ -3,6 +3,7 @@
 # version: 2.0.0
 # description: кaлькyлятop c инлaйн-кнoпкaми - нaжимaй кнoпки пpямo в чaтe
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/calc-mcub-liber-banner.png
 import math
 import ast
 import operator

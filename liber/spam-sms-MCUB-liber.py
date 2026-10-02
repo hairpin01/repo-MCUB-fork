@@ -4,6 +4,7 @@
 # version: 1.0.0
 # description: Пpocтoй мoдyль для cпaмa
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/spam-sms-mcub-liber-banner.png
 import asyncio
 
 def register(kernel):

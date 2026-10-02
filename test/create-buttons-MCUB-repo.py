@@ -1,4 +1,5 @@
 # scop: kernel min v1.2.6.1
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/create-buttons-banner.png
 from core.lib.loader.module_base import ModuleBase, command, callback
 import utils
 from typing import Any

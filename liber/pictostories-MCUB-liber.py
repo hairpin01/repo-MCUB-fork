@@ -19,6 +19,7 @@
 # author: @ke_mods
 # description: Grid 3x3 for stories
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/pictostories-mcub-liber-banner.png
 import io
 import asyncio
 from PIL import Image

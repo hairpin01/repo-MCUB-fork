@@ -6,6 +6,7 @@
 # author: @Hairpin00
 # version: 1.0.0
 # description: ru: Cлyчaйнoe фoтo кoтa / en: Random cat photo
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/cat-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 import aiohttp
 

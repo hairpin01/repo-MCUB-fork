@@ -1,3 +1,4 @@
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/unico-banner.png
 from __future__ import annotations
 
 import io

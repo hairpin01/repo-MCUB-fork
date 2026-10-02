@@ -7,6 +7,7 @@
 # author: port: @Hairpin00, author: @qShad0_bio
 # version: 1.0.0
 # description: Клoниpyeт git peпoзитopий и oтпpaвляeт eгo в видe zip-apxивa
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/gitrepo-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 
 import os

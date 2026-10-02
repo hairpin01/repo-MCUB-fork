@@ -2,6 +2,7 @@
 # dir: test
 # file: 'test-rich-buttons.py'
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/testrichbutton-banner.png
 from html import escape
 from typing import Any
 

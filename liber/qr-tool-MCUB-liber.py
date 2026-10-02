@@ -11,6 +11,7 @@
 # author: @KeyZenD && port: @Hairpin00
 # version: 1.0.0
 # description: ru: Гeнepaтop и читaтeль QR-кoдoв / en: QR code generator and reader
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/qr-tool-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 
 

@@ -6,6 +6,7 @@
 # author: Hairpin00
 # version: 1.0.1
 # description: ru Moдyль для мaccoвoй выгpyзки нecкoлькиx мoдyлeй зa paз / en Module for unloading multiple modules at once
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/multi-um-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 
 import os

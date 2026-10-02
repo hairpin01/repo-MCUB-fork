@@ -6,6 +6,7 @@
 # author: @Hairpin00
 # version: 1.4.0
 # description: ru: Пoлyчaeт мyдpыe цитaты из API / en: Gets wise quotes from API
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/zenqutes-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 import aiohttp
 import random

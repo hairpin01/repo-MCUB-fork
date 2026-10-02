@@ -23,6 +23,7 @@
 # author: port: @Hairpin00, author: @KeyZenD
 # version: 1.0.0
 # description: Makes message monospace
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/keyboard-lagre-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 
 from utils import get_args, get_args_raw

@@ -19,6 +19,7 @@
 # author: port: @Hairpin00, author: @Hicota
 # version: 1.0.0
 # description: ASCII Arts | Различные прикольные арты 0_o
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/asrt-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 
 import asyncio

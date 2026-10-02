@@ -1,4 +1,5 @@
 # scop: kernel min v1.2.6.1
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/sosal-clicker-mcub-repo-banner.png
 from typing import Any
 from telethon import events
 

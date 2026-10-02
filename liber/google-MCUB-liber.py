@@ -6,6 +6,7 @@
 # author: @Hairpin00
 # version: 2.0.0
 # description: Google (Text) + DuckDuckGo (Images) search with pagination
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/google-mcub-liber-banner.png
 # ----------------------- End ------------------------------
 
 import uuid

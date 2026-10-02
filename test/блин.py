@@ -2,6 +2,7 @@
 # powered by MCUB userbot
 # 🥞🥞🥞🥞🥞🥞🥞🥞🥞🥞🥞
 
+# banner_url: https://raw.githubusercontent.com/hairpin01/repo-MCUB-fork/main/assets/banner/module-banner.png
 import core.lib.loader.module_base as loader # БЛИНОВЫЙ ИМПОРТ
 from core.lib.types import Event # 🥞🥞🥞
 
